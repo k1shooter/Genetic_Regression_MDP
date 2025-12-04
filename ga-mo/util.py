@@ -1,13 +1,19 @@
 import os
 import pandas as pd
 
-def load_data(dataset_name, data_type='rf'):
-    # Get the directory containing this script (classifiers/)
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    # Get project root (parent of classifiers/)
-    project_root = os.path.dirname(base_dir)
-    # Path to data directory
-    data_dir = os.path.join(project_root, 'data')
+def load_data_robust(dataset_name, data_type='pt'):
+    # Assumes script is running from project root or ga-mo/ directory
+    
+    base_dir = os.getcwd()
+    data_dir = os.path.join(base_dir, 'data')
+    
+    if not os.path.exists(data_dir):
+        # Try one level up if we are in ga-mo/
+        data_dir = os.path.join(base_dir, '../data')
+    
+    if not os.path.exists(data_dir):
+        print(f"❌ 데이터 디렉토리를 찾을 수 없습니다: {data_dir}")
+        return None, None, None, None
 
     try:
         train_path = os.path.join(data_dir, f'{dataset_name}_train_{data_type}.csv')

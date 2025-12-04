@@ -10,6 +10,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from tabulate import tabulate
 from tqdm import tqdm
 from util import load_data
+from datetime import datetime
 
 DATASET_NAMES = ['CM1', 'JM1', 'KC1', 'KC3', 'MC1', 'MC2', 'MW1', 'PC1', 'PC2', 'PC3', 'PC4', 'PC5']
 EPOCHS = 100
@@ -20,13 +21,14 @@ LEARNING_RATE = 0.005
 class DefectDataset(Dataset):
     def __init__(self, X_data, y_data):
         self.X_data = torch.tensor(X_data.values, dtype=torch.float32)
-        self.y_data = torch.tensor(y_data.values, dtype=torch.float32).unsqueeze(1) 
+        self.y_data = torch.tensor(y_data.values, dtype=torch.float32).unsqueeze(1)
 
     def __len__(self):
         return len(self.X_data)
 
     def __getitem__(self, index):
         return self.X_data[index], self.y_data[index]
+
 
 class DefectClassifier(nn.Module):
     def __init__(self, input_size, hidden_size=64, output_size=1):
@@ -50,14 +52,14 @@ class DefectClassifier(nn.Module):
 
 def train_and_evaluate_pytorch(dataset_name):
     X_train, y_train, X_test, y_test = load_data(dataset_name, data_type='pt')
-    
+
     if X_train is None:
         return None
 
     train_dataset = DefectDataset(X_train, y_train)
     test_dataset = DefectDataset(X_test, y_test)
-    train_loader = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last = True)
-    
+    train_loader = DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+
     INPUT_SIZE = X_train.shape[1]
     pos_count = y_train.sum()
     neg_count = len(y_train) - pos_count
@@ -77,10 +79,10 @@ def train_and_evaluate_pytorch(dataset_name):
             optimizer.step()
 
     model.eval()
-    
+
     X_test_tensor = torch.tensor(X_test.values, dtype=torch.float32)
     y_test_tensor = torch.tensor(y_test.values, dtype=torch.float32).unsqueeze(1)
-    
+
     with torch.no_grad():
         y_pred_logits = model(X_test_tensor)
         y_pred_prob = torch.sigmoid(y_pred_logits)
@@ -94,12 +96,13 @@ def train_and_evaluate_pytorch(dataset_name):
 
     return {'Dataset': dataset_name, 'Accuracy': accuracy, 'F1_Defective': f1_defective}
 
+
 if __name__ == '__main__':
     results = []
-    print("="*60)
+    print("=" * 60)
     print("🧠 PyTorch 신경망 분류기 분석 시작")
-    print("="*60)
-    
+    print("=" * 60)
+
     for name in DATASET_NAMES:
         result = train_and_evaluate_pytorch(name)
         if result:
@@ -109,3 +112,9 @@ if __name__ == '__main__':
         headers = ["Dataset", "Accuracy", "F1 (Defective)"]
         table = [[r['Dataset'], f"{r['Accuracy']:.4f}", f"{r['F1_Defective']:.4f}"] for r in results]
         print(tabulate(table, headers=headers, tablefmt="fancy_grid"))
+
+        # Save detailed results to CSV
+        df_res = pd.DataFrame(results)
+        version = datetime.now().strftime('%m%d_%H%M%S')
+        df_res.to_csv(f'dnn_results.csv_{version}', index=False)
+        print("\n💾 결과가 'dnn_results.csv'에 저장되었습니다.")
