@@ -7,8 +7,8 @@ from gptree import generate_tree, Node
 
 class MultiObjectiveGP:
     def __init__(self, n_features, 
-                 pop_size=100, 
-                 generations=50, 
+                 pop_size=300, 
+                 generations=100, 
                  max_depth=5, 
                  crossover_rate=0.9, 
                  mutation_rate=0.1,

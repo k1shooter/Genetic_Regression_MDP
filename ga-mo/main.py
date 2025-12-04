@@ -32,8 +32,8 @@ def run_mo_ga_on_dataset(dataset_name):
     # Hyperparameters
     moga = MultiObjectiveGP(
         n_features=input_size,
-        pop_size=100, 
-        generations=30, # Bit more generations for convergence
+        pop_size=300, 
+        generations=100, # Increased generations for convergence
         max_depth=6,
         crossover_rate=0.9,
         mutation_rate=0.1,
