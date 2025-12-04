@@ -39,3 +39,8 @@ if __name__ == '__main__':
         headers = ["Dataset", "Accuracy", "F1 (Defective)"]
         table = [[r['Dataset'], f"{r['Accuracy']:.4f}", f"{r['F1_Defective']:.4f}"] for r in results]
         print(tabulate(table, headers=headers, tablefmt="fancy_grid"))
+
+        # Save detailed results to CSV
+        df_res = pd.DataFrame(results)
+        df_res.to_csv('naive_bayes_results.csv', index=False)
+        print("\n💾 결과가 'naive_bayes_results.csv'에 저장되었습니다.")
