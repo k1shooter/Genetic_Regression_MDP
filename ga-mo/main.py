@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from tabulate import tabulate
 from sklearn.metrics import accuracy_score, f1_score
+from datetime import datetime
 
 # Ensure local modules are found
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -106,5 +107,6 @@ if __name__ == "__main__":
         print("\n" + tabulate(table_data, headers=headers, tablefmt="simple"))
         
         df_res = pd.DataFrame(all_results)
-        df_res.to_csv('ga_mo_results.csv', index=False)
+        version = datetime.now().strftime("%m%d_%H%M%S")
+        df_res.to_csv(f'ga_mo_results_{version}.csv', index=False)
         print("\n💾 결과가 'ga_mo_results.csv'에 저장되었습니다.")
