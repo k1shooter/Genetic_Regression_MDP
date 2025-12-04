@@ -49,7 +49,9 @@ class MultiObjectiveGP:
             obj1 = 1 - f1
             
             # Objective 2: Minimize Complexity (Tree Size)
-            obj2 = individual.size()
+            # Treat sizes <= 5 as equal to 5
+            size = individual.size()
+            obj2 = 5 if size <= 5 else size
             
             individual.objectives = (obj1, obj2)
             individual.f1_score = f1 # Store for easy access
