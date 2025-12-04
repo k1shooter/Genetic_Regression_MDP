@@ -1,1 +1,7 @@
 data/
+
+.idea/*
+
+# uv
+/.python-version
+/pyproject.toml
