@@ -31,7 +31,7 @@ class DefectDataset(Dataset):
 
 
 class DefectClassifier(nn.Module):
-    def __init__(self, input_size, hidden_size=64, output_size=1):
+    def __init__(self, input_size, hidden_size=64, output_size=1, dropout_rate=0.2):
         super(DefectClassifier, self).__init__()
         self.layer_1 = nn.Linear(input_size, hidden_size)
         self.bn1 = nn.BatchNorm1d(hidden_size)
@@ -39,7 +39,7 @@ class DefectClassifier(nn.Module):
         self.bn2 = nn.BatchNorm1d(hidden_size // 2)
         self.layer_out = nn.Linear(hidden_size // 2, output_size)
         self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=dropout_rate)
 
     def forward(self, x):
         x = self.relu(self.bn1(self.layer_1(x)))
