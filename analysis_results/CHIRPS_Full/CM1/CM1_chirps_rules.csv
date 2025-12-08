@@ -1,0 +1,4 @@
+Dataset,Instance_ID,Predicted_Class,Stability,Covered_Target,Covered_Others,Rule
+CM1,1,0,0.0,0,0,No rule found.
+CM1,10,0,0.0,0,0,No rule found.
+CM1,14,0,0.9030837004405287,204,21,(LOC_TOTAL <= 76.5)
