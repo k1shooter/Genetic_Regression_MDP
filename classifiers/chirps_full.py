@@ -19,19 +19,6 @@ except ImportError:
 
 warnings.filterwarnings("ignore")
 
-# 한글 폰트 설정 (플롯용)
-def set_korean_font():
-    system_name = platform.system()
-    if system_name == 'Windows':
-        plt.rc('font', family='Malgun Gothic')
-    elif system_name == 'Darwin':
-        plt.rc('font', family='AppleGothic')
-    else:
-        plt.rc('font', family='NanumGothic')
-    plt.rcParams['axes.unicode_minus'] = False
-
-set_korean_font()
-
 DATASET_NAMES = ['CM1', 'JM1', 'KC1']
 
 class CHIRPSExplainerEnhanced:

@@ -15,12 +15,14 @@ from util import load_data
 
 warnings.filterwarnings("ignore")
 
+
+
 DATASET_NAMES = ['CM1', 'JM1', 'KC1'] 
 
 def get_primary_chirps_threshold(model, feature_idx):
     """
-    [CHIRPS] 가장 강력한 분기점(Primary Threshold) 하나만 찾습니다.
-    분기점 전후를 나누는 기준이 됩니다.
+    [CHIRPS Logic]
+    가장 강력한 분기점(Primary Threshold)과 그 지점의 안정성(Stability/Density)을 반환합니다.
     """
     thresholds = []
     for estimator in model.estimators_:
@@ -30,10 +32,12 @@ def get_primary_chirps_threshold(model, feature_idx):
         mask = feature_indices == feature_idx
         thresholds.extend(threshold_values[mask])
     
+    # 데이터가 너무 적으면 분기점 없음
     if len(thresholds) < 10:
-        return None
+        return None, 0.0
 
     try:
+        # KDE로 밀도 추정
         density = gaussian_kde(thresholds, bw_method='silverman')
         min_th, max_th = np.percentile(thresholds, [1, 99])
         xs = np.linspace(min_th, max_th, 200)
@@ -41,51 +45,50 @@ def get_primary_chirps_threshold(model, feature_idx):
         
         peaks, _ = find_peaks(ys)
         if len(peaks) == 0:
-            return None
+            return None, 0.0
 
-        # 가장 높은 Peak 하나를 반환
-        peak_xs = xs[peaks]
-        peak_ys = ys[peaks]
-        best_idx = np.argmax(peak_ys)
-        return peak_xs[best_idx]
+        # 가장 높은 Peak(가장 빈번한 합의점) 하나를 반환
+        best_idx = np.argmax(ys[peaks])
+        peak_idx = peaks[best_idx]
+        
+        split_point = xs[peak_idx]
+        stability_score = ys[peak_idx] # 밀도 높이 (=Stability 대용)
+        
+        return split_point, stability_score
         
     except Exception:
-        return None
+        return None, 0.0
 
 def fit_piecewise_linear(pdp_x, pdp_y, split_point):
     """
     [구간 선형 회귀]
-    split_point(분기점)를 기준으로 데이터를 두 쪽(Left, Right)으로 나누고,
-    각각 선형 회귀를 수행하여 기울기 2개를 구합니다.
     """
-    # 1. 분기점이 유효한지 확인 (데이터 범위 내에 있는지)
+    # 1. 분기점이 유효한지 확인
     if split_point is None or split_point <= pdp_x.min() or split_point >= pdp_x.max():
-        # 분기점이 없으면 전체를 하나로 피팅 (Global Slope)
         lr = LinearRegression()
         lr.fit(pdp_x.reshape(-1, 1), pdp_y)
         return [(pdp_x, lr.predict(pdp_x.reshape(-1, 1)), lr.coef_[0])], "Linear"
 
-    # 2. 데이터 분할 (Left / Right)
+    # 2. 데이터 분할
     mask_left = pdp_x <= split_point
     mask_right = pdp_x > split_point
     
-    # 데이터가 너무 적으면 분할 취소
     if np.sum(mask_left) < 2 or np.sum(mask_right) < 2:
         lr = LinearRegression()
         lr.fit(pdp_x.reshape(-1, 1), pdp_y)
-        return [(pdp_x, lr.predict(pdp_x.reshape(-1, 1)), lr.coef_[0])], "Linear (Not enough split data)"
+        return [(pdp_x, lr.predict(pdp_x.reshape(-1, 1)), lr.coef_[0])], "Linear (Not enough data)"
 
     # 3. 각각 피팅
     fits = []
     
-    # Left Segment
+    # Left
     x_left = pdp_x[mask_left].reshape(-1, 1)
     y_left = pdp_y[mask_left]
     lr_left = LinearRegression()
     lr_left.fit(x_left, y_left)
     fits.append((pdp_x[mask_left], lr_left.predict(x_left), lr_left.coef_[0]))
     
-    # Right Segment
+    # Right
     x_right = pdp_x[mask_right].reshape(-1, 1)
     y_right = pdp_y[mask_right]
     lr_right = LinearRegression()
@@ -94,25 +97,21 @@ def fit_piecewise_linear(pdp_x, pdp_y, split_point):
     
     return fits, "Piecewise"
 
-def save_piecewise_plot(pdp_x, pdp_y, fits, split_point, feature_name, dataset_name, save_dir):
+def save_piecewise_plot(pdp_x, pdp_y, fits, split_point, stability, importance, feature_name, dataset_name, save_dir):
     plt.figure(figsize=(10, 6))
     
     # 아웃라이어 제거 (시각화용)
     limit_idx = int(len(pdp_x) * 0.95)
     x_vis_max = pdp_x[limit_idx]
     
-    # PDP 원본 그리기
     mask_vis = pdp_x <= x_vis_max
     plt.plot(pdp_x[mask_vis], pdp_y[mask_vis], label='PDP (Actual)', color='lightgray', linewidth=4, alpha=0.6)
     
-    # 구간별 피팅 라인 그리기
     colors = ['blue', 'red']
     labels = ['Before Split', 'After Split']
-    
     slopes = []
     
     for i, (x_seg, y_pred, slope) in enumerate(fits):
-        # 시각화 범위 내 데이터만 플롯
         mask_seg = x_seg <= x_vis_max
         if np.sum(mask_seg) > 0:
             plt.plot(x_seg[mask_seg], y_pred[mask_seg], 
@@ -120,15 +119,19 @@ def save_piecewise_plot(pdp_x, pdp_y, fits, split_point, feature_name, dataset_n
                      color=colors[i], linestyle='--', linewidth=2)
         slopes.append(slope)
 
-    # 분기점 표시
     if split_point and split_point <= x_vis_max:
-        plt.axvline(x=split_point, color='green', linestyle=':', linewidth=2, label=f'Threshold ({split_point:.2f})')
+        plt.axvline(x=split_point, color='green', linestyle=':', linewidth=2, 
+                    label=f'Split ({split_point:.2f}, Stab:{stability:.2f})')
 
     plt.legend()
-    plt.title(f"Piecewise Analysis: {feature_name} ({dataset_name})")
+    # 제목에 중요도와 안정성 표시
+    title_str = (f"Feature: {feature_name} ({dataset_name})\n"
+                 f"Importance: {importance:.4f} | Split Stability: {stability:.2f}")
+    plt.title(title_str)
     plt.xlabel(f"{feature_name}")
-    plt.ylabel("Impact")
+    plt.ylabel("Impact (Defect Probability)")
     plt.grid(True, alpha=0.3)
+    plt.tight_layout()
     
     filename = f"{dataset_name}_{feature_name}_piecewise.png".replace(" ", "_").replace("/", "_")
     plt.savefig(os.path.join(save_dir, filename))
@@ -137,7 +140,7 @@ def save_piecewise_plot(pdp_x, pdp_y, fits, split_point, feature_name, dataset_n
     return slopes
 
 def analyze_dataset_piecewise(dataset_name):
-    print(f"\n🚀 Analyzing Dataset (Piecewise): {dataset_name}")
+    print(f"\n🚀 Analyzing Dataset (Piecewise + Metrics): {dataset_name}")
     X_train, y_train, X_test, y_test = load_data(dataset_name, data_type='rf')
     
     if X_train is None:
@@ -147,8 +150,11 @@ def analyze_dataset_piecewise(dataset_name):
     model.fit(X_train, y_train)
     
     feature_names = X_train.columns.tolist()
+    
+    # Feature Importance 가져오기
     importances = model.feature_importances_
-    indices = np.argsort(importances)[::-1][:5] # Top 5 Features
+    # 중요도 순으로 정렬된 인덱스
+    indices = np.argsort(importances)[::-1][:5] 
     
     save_dir = f"analysis_results/Piecewise/{dataset_name}"
     os.makedirs(save_dir, exist_ok=True)
@@ -157,43 +163,47 @@ def analyze_dataset_piecewise(dataset_name):
 
     for idx in indices:
         f_name = feature_names[idx]
+        imp_val = importances[idx]  # [추가] 중요도 값
         
         # 1. PDP 생성
         pdp_results = partial_dependence(model, X_train, features=[idx], grid_resolution=100)
         pdp_x = pdp_results['grid_values'][0]
         pdp_y = pdp_results['average'][0]
         
-        # 2. CHIRPS 분기점 찾기
-        split_point = get_primary_chirps_threshold(model, idx)
+        # 2. CHIRPS 분기점 및 안정성 찾기 [수정]
+        split_point, stability = get_primary_chirps_threshold(model, idx)
         
-        # 3. 구간별 피팅 (핵심 로직 변경됨)
+        # 3. 구간별 피팅
         fits, fit_type = fit_piecewise_linear(pdp_x, pdp_y, split_point)
         
-        # 4. 시각화 및 기울기 추출
-        slopes = save_piecewise_plot(pdp_x, pdp_y, fits, split_point, f_name, dataset_name, save_dir)
+        # 4. 시각화 (중요도/안정성 정보 전달) [수정]
+        slopes = save_piecewise_plot(pdp_x, pdp_y, fits, split_point, stability, imp_val, f_name, dataset_name, save_dir)
         
-        # 5. 수식 텍스트 생성 (엑셀용)
+        # 5. 수식 텍스트 생성
         if fit_type == "Piecewise":
             slope_before = slopes[0]
             slope_after = slopes[1]
             formula_str = (f"IF({f_name} <= {split_point:.2f}, "
                            f"{slope_before:.3f} * {f_name}, "
-                           f"{slope_after:.3f} * {f_name} + Offset)")
+                           f"{slope_after:.3f} * {f_name})")
         else:
             formula_str = f"{slopes[0]:.3f} * {f_name} (Linear)"
             
         formulas.append({
             'Feature': f_name,
+            'Importance': imp_val,       # [추가]
+            'Split_Stability': stability,# [추가]
             'Fit_Type': fit_type,
             'Split_Point': split_point if split_point else "N/A",
             'Slope_Before': slopes[0],
             'Slope_After': slopes[1] if len(slopes) > 1 else "N/A",
             'Formula': formula_str
         })
-        print(f"  - {f_name}: Type={fit_type}, Split={split_point}")
+        print(f"  - {f_name}: Imp={imp_val:.3f}, Stab={stability:.2f}, Type={fit_type}")
 
     # 결과 저장
-    pd.DataFrame(formulas).to_csv(os.path.join(save_dir, "piecewise_formulas.csv"), index=False)
+    pd.DataFrame(formulas).to_csv(os.path.join(save_dir, "piecewise_formulas_metrics.csv"), index=False)
+    print(f"💾 Results saved to {save_dir}/piecewise_formulas_metrics.csv")
 
 if __name__ == "__main__":
     if not os.path.exists("../data"):
@@ -204,3 +214,5 @@ if __name__ == "__main__":
             analyze_dataset_piecewise(name)
         except Exception as e:
             print(f"Error: {e}")
+            import traceback
+            traceback.print_exc()
