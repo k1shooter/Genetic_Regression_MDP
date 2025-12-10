@@ -177,7 +177,7 @@ class MultiObjectiveGP:
                  metric='mcc',
                  # [RL-GEP] 추가된 하이퍼파라미터
                  rl_hybrid_ratio=0.5, # 50% 확률로 RL 사용 (조정 가능)
-                 rl_learning_rate=0.001):
+                 rl_learning_rate=0.01):
         
         self.n_features = n_features
         self.pop_size = pop_size
@@ -197,7 +197,7 @@ class MultiObjectiveGP:
         
         self.population = []
         self.pareto_front = []
-        
+        # self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         # RL Agent 초기화 (최대 노드 수는 depth 5를 고려해 넉넉히 30으로 설정)
         self.rl_agent = RLAgent(n_features, max_nodes=30, lr=rl_learning_rate)
 
@@ -244,7 +244,7 @@ class MultiObjectiveGP:
             
             # Objective 2: 복잡도 (연속적 페널티 적용)
             size = individual.size()
-            penalty_coefficient = 0.02 
+            penalty_coefficient = 0.001
             obj2 = size * penalty_coefficient
             
             individual.objectives = (obj1, obj2)

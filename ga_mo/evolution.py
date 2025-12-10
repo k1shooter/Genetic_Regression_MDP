@@ -74,7 +74,7 @@ class MultiObjectiveGP:
             # [수정] 노드 1개당 0.02의 페널티 부여 (MCC 0.02 상승 가치와 동일)
             # 너무 크면(0.05) 성능 포기가 심하고, 너무 작으면(0.001) 수식이 너무 복잡해짐
             size = individual.size()
-            penalty_coefficient = 0.02 
+            penalty_coefficient = 0.001 
             obj2 = size * penalty_coefficient
             
             individual.objectives = (obj1, obj2)

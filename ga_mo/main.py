@@ -27,54 +27,49 @@ DATASET_NAMES = ['CM1', 'JM1', 'KC1', 'KC3', 'MC1', 'MC2', 'MW1', 'PC1', 'PC2', 
 
 ######################################## 김승준 :seeding용 함수들
 # [새로 추가된 함수] CHIRPS Rule을 GA용 산술 트리로 변환
-def convert_rule_to_arithmetic_tree(rule, scaling_factor=10.0):
+def strong_convert_rule(rule, scaling=10.0, use_log=True):
     """
-    CHIRPS Rule을 GA용 산술 트리로 변환 (Stronger Version)
-    1. 조건 결합: 덧셈(+) 대신 곱셈(*)을 사용해 조건 간 상호작용 강화 (Option)
-       -> 다만, 음수*음수=양수 문제가 생길 수 있어 안전하게 덧셈 유지하되 증폭하는 것이 일반적임.
-       -> 여기서는 가장 안전하고 강력한 '덧셈 결합 후 증폭' 방식을 적용합니다.
-    2. 신호 증폭: 최종 결과에 scaling_factor를 곱해 0.5 근처가 아닌 0 or 1에 가까운 확률 배출
+    CHIRPS 규칙을 GA용 산술 트리로 변환
+    - use_log=True: 변수와 임계값에 Log를 씌워 스케일 차이를 완화함 (권장)
+    - 수식: (log(Threshold) - log(Feature)) * Scaling
     """
-    if not rule:
-        return None
-
+    if not rule: return None
+    
     f_add = FUNCTIONS['add'][0]
     f_sub = FUNCTIONS['sub'][0]
-    f_mul = FUNCTIONS['mul'][0] # [New] 곱셈 함수
-
+    f_mul = FUNCTIONS['mul'][0]
+    f_log = FUNCTIONS['log'][0] # Log 함수 가져오기
+    
     nodes = []
-    for feat_idx, op, thresh in rule:
-        feat_node = Node(val=feat_idx) 
-        const_node = Node(val=float(thresh))
+    for f_idx, op, th in rule:
+        # 1. 노드 생성
+        node_feat = Node(val=f_idx)
+        node_th = Node(val=float(th))
         
-        # [Step 1] 기본 산술식 생성 (Gradient 유지)
+        # 2. Log 적용 (스케일 보정)
+        # 원본 데이터(_rf)는 대부분 양수이므로 Log가 효과적임
+        if use_log:
+            node_feat = Node(None, func=f_log, children=[node_feat]) # log(x)
+            node_th = Node(None, func=f_log, children=[node_th])     # log(t)
+            
+        # 3. 차분(Difference) 계산
+        # log(t) - log(x) = log(t/x) 와 유사한 효과
         if op == '<=':
-            # (Threshold - Feature) : 조건 만족 시 양수
-            term = Node(None, func=f_sub, children=[const_node, feat_node])
-        else: # '>'
-            # (Feature - Threshold) : 조건 만족 시 양수
-            term = Node(None, func=f_sub, children=[feat_node, const_node])
+            # 조건: x <= t  ->  t가 더 크면 양수
+            term = Node(None, func=f_sub, children=[node_th, node_feat])
+        else: 
+            # 조건: x > t   ->  x가 더 크면 양수
+            term = Node(None, func=f_sub, children=[node_feat, node_th])
             
         nodes.append(term)
     
-    if not nodes:
-        return None
-        
-    # [Step 2] 조건 결합 (여기서는 안전성을 위해 Add 유지)
-    # 곱셈(Mul)을 쓰면 (-1) * (-1) = +1 이 되어, 둘 다 틀렸는데 맞았다고 착각할 위험이 큼
-    combined_tree = nodes[0]
-    for i in range(1, len(nodes)):
-        combined_tree = Node(None, func=f_add, children=[combined_tree, nodes[i]])
-
-    # [Step 3] 🔥 강력한 신호 증폭 (Scaling)
-    # 전체 식에 10.0 등을 곱해서, 조금만 만족해도 Sigmoid 확률이 1.0에 가깝게 찍히도록 함
-    # 수식: (Cond1 + Cond2) * 10.0
-    strong_seed = Node(None, func=f_mul, children=[
-        combined_tree,
-        Node(val=scaling_factor) # 강력한 가중치 (기본 10.0)
-    ])
-        
-    return strong_seed
+    # 조건 합산 (Add)
+    combined = nodes[0]
+    for i in range(1, len(nodes)): 
+        combined = Node(None, func=f_add, children=[combined, nodes[i]])
+    
+    # 신호 증폭 (Scaling)
+    return Node(None, func=f_mul, children=[combined, Node(val=scaling)])
 
 # [새로 추가된 함수] CHIRPS 실행 및 Seed 생성
 def get_chirps_seeds(X_train, y_train, n_seeds=20):
@@ -95,7 +90,7 @@ def get_chirps_seeds(X_train, y_train, n_seeds=20):
         s_y = y_train.copy()
 
     # 가벼운 RF 모델 학습
-    rf = RandomForestClassifier(n_estimators=30, max_depth=5, random_state=42, n_jobs=-1)
+    rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42, n_jobs=-1)
     rf.fit(df_X, s_y)
     
     num_classes = len(np.unique(s_y))
@@ -119,7 +114,7 @@ def get_chirps_seeds(X_train, y_train, n_seeds=20):
                 if rule_str not in seen_rules:
                     seen_rules.add(rule_str)
                     # 트리 변환
-                    tree_seed = convert_rule_to_arithmetic_tree(exp['rule'])
+                    tree_seed = strong_convert_rule(exp['rule'])
                     if tree_seed:
                         seeds.append(tree_seed)
         except Exception:
@@ -135,7 +130,7 @@ def optimize_and_evaluate(dataset_name, X_train, y_train, X_test, y_test, target
     # evolution.py가 metric 인자를 받도록 수정되었다고 가정
     moga = MultiObjectiveGP(
         n_features=X_train.shape[1], pop_size=300, generations=100, max_depth=6,
-        crossover_rate=0.9, mutation_rate=0.1, random_state=42, metric=target_metric
+        crossover_rate=0.8, mutation_rate=0.2, random_state=42, metric=target_metric
     )
     pareto_front = moga.fit(X_train, y_train, seeds=seeds)
     
@@ -169,7 +164,7 @@ def optimize_and_evaluate(dataset_name, X_train, y_train, X_test, y_test, target
 def run_mo_ga_on_dataset(dataset_name, need_seed = False):
     print(f"\n🚀 {dataset_name} Multi-Objective 분석 시작...")
     # 독립 전처리 데이터를 사용하려면 util.py 수정 혹은 직접 로드 필요 (현재는 기존 유지)
-    X_train, y_train, X_test, y_test = load_data_robust(dataset_name, data_type='pt')
+    X_train, y_train, X_test, y_test = load_data_robust(dataset_name, data_type='rf')
     
     if X_train is None: return []
     if need_seed:

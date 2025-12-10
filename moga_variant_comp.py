@@ -8,50 +8,64 @@ from datetime import datetime
 # ====================================================
 # [1] 환경 설정 및 모듈 로드
 # ====================================================
-# ga-mo 폴더를 경로에 추가
+# ga-mo 폴더를 경로에 추가하여 모듈을 찾을 수 있게 함
 sys.path.append(os.path.abspath("ga_mo"))
 
 # 메인 실행 로직 및 클래스 로드
-import ga_mo.main as main_script        # 실행 로직 (run_mo_ga_on_dataset)
-import ga_mo.evolution as std_class     # 일반 GP 클래스
-import ga_mo.rl_gep as rl_class         # RL GP 클래스
-from ga_mo.gptree import Node, FUNCTIONS
+try:
+    import ga_mo.main as main_script        # 실행 로직 (run_mo_ga_on_dataset 등)
+    import ga_mo.evolution as std_class     # 일반 GP 클래스 (Standard, Seeding)
+    import ga_mo.rl_gep as rl_class         # RL GP 클래스 (RL, RL+Seeding)
+    from ga_mo.gptree import Node, FUNCTIONS
+except ImportError as e:
+    print(f"❌ 필수 모듈 로드 실패: {e}")
+    print("   'ga-mo' 폴더가 현재 위치에 있는지 확인해주세요.")
+    sys.exit(1)
 
 # ====================================================
-# [2] 강력한 Seeding 함수 (Monkey Patch용)
+# [2] 실행 로직 최적화 (속도 향상)
 # ====================================================
-def strong_convert_rule(rule, scaling=10.0):
-    """CHIRPS 규칙을 강력한 신호(곱셈+증폭)를 가진 트리로 변환"""
-    if not rule: return None
-    f_add, f_sub, f_mul = FUNCTIONS['add'][0], FUNCTIONS['sub'][0], FUNCTIONS['mul'][0]
+def run_f1_only(dataset_name, need_seed=False):
+    """
+    기존 main.py의 실행 함수를 대체하여,
+    불필요한 MCC 최적화 루프를 제거하고 'F1' 타겟만 수행합니다.
+    (속도 약 2배 향상)
+    """
+    print(f"\n🚀 {dataset_name} Multi-Objective 분석 시작 (Target: F1 Only)...")
     
-    nodes = []
-    for f_idx, op, th in rule:
-        # 조건식 생성: (Threshold - Feature) 또는 (Feature - Threshold)
-        term = Node(None, func=f_sub, children=[Node(val=float(th)), Node(val=f_idx)]) if op == '<=' \
-          else Node(None, func=f_sub, children=[Node(val=f_idx), Node(val=float(th))])
-        nodes.append(term)
+    # 데이터 로드 (main_script의 유틸리티 활용)
+    # 전처리된 데이터가 없으면 None 반환
+    X_train, y_train, X_test, y_test = main_script.load_data_robust(dataset_name, data_type='pt')
     
-    # 조건 합산 (Add)
-    combined = nodes[0]
-    for i in range(1, len(nodes)): 
-        combined = Node(None, func=f_add, children=[combined, nodes[i]])
-    
-    # 신호 증폭 (Scaling)
-    return Node(None, func=f_mul, children=[combined, Node(val=scaling)])
+    if X_train is None: 
+        return []
 
-# main.py의 함수를 위 함수로 교체 (Seeding 강화)
-main_script.convert_rule_to_arithmetic_tree = strong_convert_rule
+    # Seeding 준비
+    seeds = None
+    if need_seed:
+        # main.py에 이미 정의된 CHIRPS 시드 생성 함수 사용
+        seeds = main_script.get_chirps_seeds(X_train, y_train, n_seeds=20)
+
+    data = (X_train.values, y_train.values, X_test.values, y_test.values)
+    
+    # [핵심] for loop 없이 'f1' 타겟으로만 1회 실행
+    return main_script.optimize_and_evaluate(dataset_name, *data, 'f1', seeds=seeds)
+
+# main.py의 원래 함수를 우리가 만든 최적화 함수로 교체 (Monkey Patch)
+main_script.run_mo_ga_on_dataset = run_f1_only
 
 # ====================================================
-# [3] 결과 시각화 함수 (Acc, F1, MCC 그래프 저장)
+# [3] 결과 시각화 함수
 # ====================================================
 def save_comparison_plots(df, save_dir="final_comparison_results"):
+    """결과 데이터프레임을 받아 Acc, F1, MCC, Complexity 그래프를 저장"""
     if df.empty: return
+    
+    # 저장 폴더 생성
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    # 그릴 지표 목록 정의 (파일명, 컬럼명, 그래프 제목)
+    # 그릴 지표 목록 정의 (파일명 접미사, 컬럼명, 그래프 제목)
     metrics = [
         ("Acc", "Test_Acc", "Accuracy Comparison"),
         ("F1", "Test_F1", "F1 Score Comparison"),
@@ -61,7 +75,8 @@ def save_comparison_plots(df, save_dir="final_comparison_results"):
     
     sns.set(style="whitegrid")
     
-    print(f"\n📊 그래프 생성 중... ({save_dir} 폴더)")
+    print(f"\n📊 그래프 생성 중... (저장 위치: {save_dir})")
+    
     for name, col, title in metrics:
         if col not in df.columns: continue
         
@@ -69,33 +84,40 @@ def save_comparison_plots(df, save_dir="final_comparison_results"):
         
         # 막대 그래프 그리기
         ax = sns.barplot(
-            data=df, x="Dataset", y=col, hue="Variant",
-            palette="viridis", edgecolor="black"
+            data=df, 
+            x="Dataset", 
+            y=col, 
+            hue="Variant", 
+            palette="viridis", 
+            edgecolor="black"
         )
         
-        # 값 텍스트 표시
+        # 막대 위에 값 텍스트 표시
         for p in ax.patches:
             if p.get_height() == 0: continue
+            
+            # 복잡도는 정수, 나머지는 소수점 3자리
             fmt = f'{int(p.get_height())}' if col == 'Complexity' else f'{p.get_height():.3f}'
+            
             ax.annotate(fmt, 
                         (p.get_x() + p.get_width() / 2., p.get_height()),
-                        ha='center', va='bottom', fontsize=9, color='black', xytext=(0, 3),
-                        textcoords='offset points')
+                        ha='center', va='bottom', fontsize=9, color='black', 
+                        xytext=(0, 3), textcoords='offset points')
             
         plt.title(title, fontsize=15, fontweight='bold')
         plt.legend(title="Method", loc='best')
         plt.tight_layout()
         
-        # 저장
-        filename = f"{save_dir}/comparison_{name}.png"
+        # 파일로 저장
+        filename = os.path.join(save_dir, f"comparison_{name}.png")
         plt.savefig(filename, dpi=300)
         plt.close()
-        print(f"   Saved: {filename}")
+        print(f"   ✅ Saved: {filename}")
 
 # ====================================================
-# [4] 4가지 모드 실험 실행
+# [4] 4가지 모드 실험 설정 및 실행
 # ====================================================
-# 비교할 모드: (이름, 사용할_클래스, Seeding사용여부)
+# 비교할 모드 설정: (표시이름, 사용할_클래스_모듈, Seeding사용여부)
 MODES = [
     ("1. Standard",      std_class, False),
     ("2. Seeding",       std_class, True),
@@ -103,42 +125,55 @@ MODES = [
     ("4. RL + Seeding",  rl_class,  True),
 ]
 
+# 실행할 데이터셋 목록
 TARGET_DATASETS = ['CM1', 'JM1', 'KC1', 'KC3', 'MC1', 'MC2', 'MW1', 'PC1', 'PC2', 'PC3', 'PC4', 'PC5']
+# 테스트용 짧은 목록 (필요시 주석 해제)
+# TARGET_DATASETS = ['CM1', 'JM1', 'KC1'] 
+
 all_results = []
 
-print(f"🚀 4가지 변형 모델 비교 실험 시작: {TARGET_DATASETS}")
+print("="*60)
+print(f"🚀 4가지 변형 모델 비교 실험 시작")
+print(f"📂 대상 데이터셋: {TARGET_DATASETS}")
+print("="*60)
 
 for dataset in TARGET_DATASETS:
     print(f"\n📂 Dataset: {dataset}")
+    
     for mode_name, module_src, use_seed in MODES:
         print(f"   ▶ {mode_name} 실행 중...", end=" ", flush=True)
         
-        # [핵심] 클래스 바꿔치기 (Dynamic Injection)
+        # [핵심] 메인 로직이 사용할 GP 클래스를 동적으로 교체
+        # 이렇게 하면 main.py 코드를 수정하지 않고도 다른 알고리즘(RL 등)을 끼워 넣을 수 있음
         main_script.MultiObjectiveGP = module_src.MultiObjectiveGP
         
         try:
-            # 학습 및 평가 실행
+            # 학습 및 평가 실행 (위에서 정의한 run_f1_only가 호출됨)
             raw_res = main_script.run_mo_ga_on_dataset(dataset, need_seed=use_seed)
             
-            # F1 기준 최고 성능 모델 1개만 추출 (그래프용 대표값)
-            # (만약 F1 타겟 최적화 결과가 없다면 전체 중 최고값 선택)
+            # 결과 중 F1 점수가 가장 높은 모델 1개만 추출 (그래프용 대표값)
             best_sol = None
-            f1_targets = [r for r in raw_res if r['Target'] == 'F1']
+            
+            # run_f1_only를 썼으므로 이미 타겟은 F1이지만, 안전하게 필터링
+            f1_targets = [r for r in raw_res if r.get('Target') == 'F1' or r.get('Target') == 'F1']
             
             if f1_targets:
                 best_sol = max(f1_targets, key=lambda x: x['Test_F1'])
             elif raw_res:
+                # 타겟 정보가 없으면 그냥 전체 중 최고값
                 best_sol = max(raw_res, key=lambda x: x['Test_F1'])
                 
             if best_sol:
-                best_sol['Variant'] = mode_name
+                best_sol['Variant'] = mode_name  # 어떤 모드인지 기록
                 all_results.append(best_sol)
                 print(f"✅ 완료 (F1: {best_sol['Test_F1']:.4f})")
             else:
-                print("⚠️ 결과 없음")
+                print("⚠️ 결과 없음 (데이터셋 로드 실패 등)")
                 
         except Exception as e:
-            print(f"❌ 에러: {e}")
+            print(f"❌ 에러 발생: {e}")
+            import traceback
+            traceback.print_exc()
 
 # ====================================================
 # [5] 결과 저장 및 종료
@@ -146,15 +181,17 @@ for dataset in TARGET_DATASETS:
 if all_results:
     df = pd.DataFrame(all_results)
     
-    # CSV 저장
+    # CSV 파일 저장
     timestamp = datetime.now().strftime('%m%d_%H%M')
     csv_filename = f"final_comparison_{timestamp}.csv"
     df.to_csv(csv_filename, index=False)
-    print(f"\n💾 CSV 저장 완료: {csv_filename}")
+    print(f"\n💾 CSV 결과 파일 저장 완료: {csv_filename}")
     
-    # 그래프 저장
+    # 그래프 생성 및 저장
     save_comparison_plots(df, save_dir=f"results_plot_{timestamp}")
     
     print("\n" + "="*60)
     print("🏆 모든 실험 및 그래프 생성 완료!")
     print("="*60)
+else:
+    print("\n❌ 저장할 결과가 없습니다.")
