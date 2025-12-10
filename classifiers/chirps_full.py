@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
-from util import load_data
+from classifiers.util import load_data
 import warnings
 import platform
 

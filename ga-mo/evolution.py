@@ -29,13 +29,20 @@ class MultiObjectiveGP:
         self.population = []
         self.pareto_front = []
 
-    def initialize_population(self):
+    def initialize_population(self, seeds=None):
         self.population = []
-        for _ in range(self.pop_size):
+        
+        if seeds:
+            print(f"🌱 Seeding {len(seeds)} trees...")
+            for seed_tree in seeds:
+                self.population.append(seed_tree.copy())
+        
+        while len(self.population) < self.pop_size:
             depth = random.randint(1, self.max_depth)
             method = 'full' if random.random() < 0.5 else 'grow'
             tree = generate_tree(depth, self.n_features, method)
             self.population.append(tree)
+        #KSJ : seeds가 None일때 기존 코드 로직 유지됩니다.
 
     def evaluate_objectives(self, individual, X, y):
         """
@@ -190,8 +197,8 @@ class MultiObjectiveGP:
         
         return mutant
 
-    def fit(self, X_train, y_train):
-        self.initialize_population()
+    def fit(self, X_train, y_train, seeds=None):
+        self.initialize_population(seeds=seeds)
         
         for ind in self.population:
             self.evaluate_objectives(ind, X_train, y_train)
