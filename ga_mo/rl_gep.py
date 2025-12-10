@@ -11,85 +11,86 @@ from torch.distributions import Categorical
 # gptree 모듈 가져오기 (팀원분이 수정한 버전에 호환됨)
 from gptree import generate_tree, Node, FUNC_LIST, FUNCTIONS
 
-# --- [RL-GEP] MLP 정책 네트워크 ---
-class SimpleMLPPolicy(nn.Module):
-    """
-    상수(1.0)를 입력받아, 최대 길이(Max Length)만큼의 연산자/단말 리스트를 한 번에 예측합니다.
-    """
-    def __init__(self, num_actions, max_length=30, hidden_size=64):
-        super(SimpleMLPPolicy, self).__init__()
-        self.max_length = max_length
+class RNNPolicy(nn.Module):
+    def __init__(self, num_actions, hidden_size=64):
+        super(RNNPolicy, self).__init__()
+        self.hidden_size = hidden_size
         self.num_actions = num_actions
         
-        # 입력층: 상수 1개 -> Hidden
-        self.fc1 = nn.Linear(1, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        # [수정] 입력: 이전 행동의 임베딩 (One-hot 대신 임베딩 사용 권장)
+        self.embedding = nn.Embedding(num_actions, hidden_size)
         
-        # 출력층: [Max_Length * Num_Actions]
-        self.output_head = nn.Linear(hidden_size, max_length * num_actions)
+        # [수정] 핵심: LSTM Cell (이전 상태 기억)
+        self.lstm = nn.LSTMCell(hidden_size, hidden_size)
         
-    def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
+        # 출력: 다음 토큰의 확률
+        self.fc = nn.Linear(hidden_size, num_actions)
         
-        flat_outputs = self.output_head(x)
-        outputs = flat_outputs.view(-1, self.max_length, self.num_actions)
+    def forward(self, input_action, h_x, c_x):
+        # input_action: [Batch_Size] (인덱스)
+        embedded = self.embedding(input_action) # [Batch, Hidden]
         
-        return outputs
+        h_x, c_x = self.lstm(embedded, (h_x, c_x))
+        
+        logits = self.fc(h_x)
+        return logits, h_x, c_x
 
 class RLAgent:
-    """
-    강화학습 에이전트: MLP를 통해 수식 트리를 생성하고 REINFORCE 알고리즘으로 학습합니다.
-    """
     def __init__(self, n_features, max_nodes=30, hidden_size=64, lr=0.001, device='cpu'):
         self.n_features = n_features
         self.max_nodes = max_nodes
         self.device = device
         
-        # Action Space: [함수들(sqrt포함)..., 변수들(x0~xn), 상수]
+        # Action Space 구성 (기존과 동일)
         self.primitives = FUNC_LIST + [f"x{i}" for i in range(n_features)] + ["const"]
         self.num_actions = len(self.primitives)
-        
-        # 함수 인덱스 (Tail 제약용)
         self.func_indices = list(range(len(FUNC_LIST)))
         
-        # 신경망 초기화
-        self.policy = SimpleMLPPolicy(self.num_actions, max_nodes, hidden_size).to(device)
+        # [수정] MLP -> RNNPolicy로 변경
+        self.policy = RNNPolicy(self.num_actions, hidden_size).to(device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
         
-        # 학습 데이터 저장소
         self.saved_log_probs = []
         self.rewards = []
 
     def select_tree(self):
         """
-        MLP로 생성된 행동 리스트를 기반으로 트리를 조립합니다.
+        논문 방식: Autoregressive Generation (순차 생성)
         """
-        constant_input = torch.tensor([[1.0]]).to(self.device)
-        
-        logits = self.policy(constant_input)
-        logits = logits.squeeze(0) # [Max_Nodes, Num_Actions]
-        
         generated_actions = []
         log_probs = []
         
+        # [초기화] Start Token: 0번 인덱스(또는 임의의 값)를 Start Symbol로 가정
+        # 논문의 'Constant Input'은 바로 이 첫 시작 입력을 의미합니다.
+        curr_input = torch.tensor([0], device=self.device) 
+        
+        # LSTM Hidden State 초기화 (0 벡터)
+        h_x = torch.zeros(1, self.policy.hidden_size, device=self.device)
+        c_x = torch.zeros(1, self.policy.hidden_size, device=self.device)
+        
         for i in range(self.max_nodes):
-            l = logits[i]
+            # 1. 정책 네트워크 호출 (이전 상태 h_x, c_x를 함께 전달)
+            logits, h_x, c_x = self.policy(curr_input, h_x, c_x)
             
-            # Masking: 수식이 끝나도록 뒷부분(Tail)에서는 함수 선택 금지
+            # 2. Masking (Tail 부분에서는 함수 선택 금지)
             mask = torch.ones(self.num_actions).to(self.device)
             if i >= self.max_nodes // 2: 
                 mask[self.func_indices] = 0
             
-            masked_l = l.clone()
-            masked_l[mask == 0] = -1e9
+            masked_logits = logits.clone()
+            masked_logits[0, mask == 0] = -1e9
             
-            probs = torch.softmax(masked_l, dim=-1)
+            # 3. 행동 선택 (Sampling)
+            probs = torch.softmax(masked_logits, dim=-1)
             m = Categorical(probs)
             action = m.sample()
             
+            # 4. 저장 및 다음 단계 준비
             generated_actions.append(action.item())
             log_probs.append(m.log_prob(action))
+            
+            # [중요] 방금 뽑은 행동이 다음 스텝의 입력이 됨
+            curr_input = action 
             
         self.saved_log_probs.append(torch.stack(log_probs).sum())
         

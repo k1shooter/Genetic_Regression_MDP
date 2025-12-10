@@ -23,19 +23,18 @@ except ImportError as e:
     sys.exit(1)
 
 # ====================================================
-# [2] 실행 로직 최적화 (속도 향상)
+# [2] 실행 로직 최적화 (MCC 기준)
 # ====================================================
-def run_f1_only(dataset_name, need_seed=False):
+def run_mcc_only(dataset_name, need_seed=False):
     """
     기존 main.py의 실행 함수를 대체하여,
-    불필요한 MCC 최적화 루프를 제거하고 'F1' 타겟만 수행합니다.
-    (속도 약 2배 향상)
+    불필요한 F1 최적화 루프를 제거하고 'MCC' 타겟만 수행합니다.
     """
-    print(f"\n🚀 {dataset_name} Multi-Objective 분석 시작 (Target: F1 Only)...")
+    print(f"\n🚀 {dataset_name} Multi-Objective 분석 시작 (Target: MCC Only)...")
     
     # 데이터 로드 (main_script의 유틸리티 활용)
     # 전처리된 데이터가 없으면 None 반환
-    X_train, y_train, X_test, y_test = main_script.load_data_robust(dataset_name, data_type='pt')
+    X_train, y_train, X_test, y_test = main_script.load_data_robust(dataset_name, data_type='rf')
     
     if X_train is None: 
         return []
@@ -48,11 +47,11 @@ def run_f1_only(dataset_name, need_seed=False):
 
     data = (X_train.values, y_train.values, X_test.values, y_test.values)
     
-    # [핵심] for loop 없이 'f1' 타겟으로만 1회 실행
-    return main_script.optimize_and_evaluate(dataset_name, *data, 'f1', seeds=seeds)
+    # [핵심 변경] 'f1' -> 'mcc' 타겟으로 변경하여 실행
+    return main_script.optimize_and_evaluate(dataset_name, *data, 'mcc', seeds=seeds)
 
 # main.py의 원래 함수를 우리가 만든 최적화 함수로 교체 (Monkey Patch)
-main_script.run_mo_ga_on_dataset = run_f1_only
+main_script.run_mo_ga_on_dataset = run_mcc_only
 
 # ====================================================
 # [3] 결과 시각화 함수
@@ -133,7 +132,7 @@ TARGET_DATASETS = ['CM1', 'JM1', 'KC1', 'KC3', 'MC1', 'MC2', 'MW1', 'PC1', 'PC2'
 all_results = []
 
 print("="*60)
-print(f"🚀 4가지 변형 모델 비교 실험 시작")
+print(f"🚀 4가지 변형 모델 비교 실험 시작 (Target: MCC)")
 print(f"📂 대상 데이터셋: {TARGET_DATASETS}")
 print("="*60)
 
@@ -144,29 +143,28 @@ for dataset in TARGET_DATASETS:
         print(f"   ▶ {mode_name} 실행 중...", end=" ", flush=True)
         
         # [핵심] 메인 로직이 사용할 GP 클래스를 동적으로 교체
-        # 이렇게 하면 main.py 코드를 수정하지 않고도 다른 알고리즘(RL 등)을 끼워 넣을 수 있음
         main_script.MultiObjectiveGP = module_src.MultiObjectiveGP
         
         try:
-            # 학습 및 평가 실행 (위에서 정의한 run_f1_only가 호출됨)
+            # 학습 및 평가 실행 (위에서 정의한 run_mcc_only가 호출됨)
             raw_res = main_script.run_mo_ga_on_dataset(dataset, need_seed=use_seed)
             
-            # 결과 중 F1 점수가 가장 높은 모델 1개만 추출 (그래프용 대표값)
+            # [핵심 변경] 결과 중 MCC 점수가 가장 높은 모델 1개만 추출
             best_sol = None
             
-            # run_f1_only를 썼으므로 이미 타겟은 F1이지만, 안전하게 필터링
-            f1_targets = [r for r in raw_res if r.get('Target') == 'F1' or r.get('Target') == 'F1']
+            # run_mcc_only를 썼으므로 이미 타겟은 MCC지만, 안전하게 필터링
+            mcc_targets = [r for r in raw_res if str(r.get('Target')).upper() == 'MCC']
             
-            if f1_targets:
-                best_sol = max(f1_targets, key=lambda x: x['Test_F1'])
+            if mcc_targets:
+                best_sol = max(mcc_targets, key=lambda x: x['Test_MCC'])
             elif raw_res:
-                # 타겟 정보가 없으면 그냥 전체 중 최고값
-                best_sol = max(raw_res, key=lambda x: x['Test_F1'])
+                # 타겟 정보가 없으면 그냥 전체 중 MCC 최고값
+                best_sol = max(raw_res, key=lambda x: x['Test_MCC'])
                 
             if best_sol:
                 best_sol['Variant'] = mode_name  # 어떤 모드인지 기록
                 all_results.append(best_sol)
-                print(f"✅ 완료 (F1: {best_sol['Test_F1']:.4f})")
+                print(f"✅ 완료 (MCC: {best_sol['Test_MCC']:.4f})")
             else:
                 print("⚠️ 결과 없음 (데이터셋 로드 실패 등)")
                 
@@ -183,12 +181,12 @@ if all_results:
     
     # CSV 파일 저장
     timestamp = datetime.now().strftime('%m%d_%H%M')
-    csv_filename = f"final_comparison_{timestamp}.csv"
+    csv_filename = f"final_comparison_MCC_{timestamp}.csv"  # 파일명에 MCC 명시
     df.to_csv(csv_filename, index=False)
     print(f"\n💾 CSV 결과 파일 저장 완료: {csv_filename}")
     
     # 그래프 생성 및 저장
-    save_comparison_plots(df, save_dir=f"results_plot_{timestamp}")
+    save_comparison_plots(df, save_dir=f"results_plot_MCC_{timestamp}")
     
     print("\n" + "="*60)
     print("🏆 모든 실험 및 그래프 생성 완료!")

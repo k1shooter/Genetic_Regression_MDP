@@ -190,7 +190,7 @@ if __name__ == "__main__":
     
     all_results = []
     for name in DATASET_NAMES:
-        all_results.extend(run_mo_ga_on_dataset(name, need_seed = True))
+        all_results.extend(run_mo_ga_on_dataset(name, need_seed = False))
             
     if all_results:
         headers = ["Dataset", "Target", "Cplx", "F1", "MCC", "Acc", "Formula"]
