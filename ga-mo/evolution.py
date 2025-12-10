@@ -2,7 +2,7 @@ import numpy as np
 import random
 import copy
 from tqdm import tqdm
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, matthews_corrcoef
 from gptree import generate_tree, Node
 
 class MultiObjectiveGP:
@@ -12,7 +12,8 @@ class MultiObjectiveGP:
                  max_depth=5, 
                  crossover_rate=0.9, 
                  mutation_rate=0.1,
-                 random_state=42):
+                 random_state=42,
+                 metric='mcc'): # metric 인자 유지
         self.n_features = n_features
         self.pop_size = pop_size
         self.generations = generations
@@ -20,6 +21,7 @@ class MultiObjectiveGP:
         self.crossover_rate = crossover_rate
         self.mutation_rate = mutation_rate
         self.random_state = random_state
+        self.metric = metric.lower()
         
         random.seed(random_state)
         np.random.seed(random_state)
@@ -36,28 +38,44 @@ class MultiObjectiveGP:
             self.population.append(tree)
 
     def evaluate_objectives(self, individual, X, y):
-        # Objectives: Minimize (1 - F1), Minimize Size
+        """
+        Fitness Function:
+        1. Minimize Error (1 - Metric)
+        2. Minimize Complexity (Continuous Penalty)
+        """
         try:
             logits = individual.evaluate(X)
+            # Sigmoid logic with clipping
             logits = np.clip(logits, -20, 20)
             probs = 1 / (1 + np.exp(-logits))
             preds = np.round(probs)
             
+            # 지표 계산
             f1 = f1_score(y, preds, pos_label=1, zero_division=0)
+            mcc = matthews_corrcoef(y, preds)
             
-            # Objective 1: Minimize error (1 - F1)
-            obj1 = 1 - f1
+            individual.f1_score = f1
+            individual.mcc_score = mcc
             
-            # Objective 2: Minimize Complexity (Tree Size)
-            # Treat sizes <= 5 as equal to 5
+            # Objective 1: 성능 (Error 최소화)
+            if self.metric == 'f1':
+                obj1 = 1 - f1
+            else: # 'mcc'
+                obj1 = 1 - mcc
+            
+            # Objective 2: 복잡도 (연속적 페널티 적용)
+            # [수정] 노드 1개당 0.02의 페널티 부여 (MCC 0.02 상승 가치와 동일)
+            # 너무 크면(0.05) 성능 포기가 심하고, 너무 작으면(0.001) 수식이 너무 복잡해짐
             size = individual.size()
-            obj2 = size // 5
+            penalty_coefficient = 0.02 
+            obj2 = size * penalty_coefficient
             
             individual.objectives = (obj1, obj2)
-            individual.f1_score = f1 # Store for easy access
+            
         except Exception:
-            individual.objectives = (1.0, 1000) # Penalty for error
+            individual.objectives = (2.0, 1000.0) # Penalty
             individual.f1_score = 0.0
+            individual.mcc_score = -1.0
 
     def fast_non_dominated_sort(self, population):
         fronts = [[]]
@@ -66,7 +84,6 @@ class MultiObjectiveGP:
             p.dominated_solutions = []
             
             for q in population:
-                # Check dominance
                 # p dominates q if p is better or equal in all objectives AND strictly better in at least one
                 p_better_eq = (p.objectives[0] <= q.objectives[0]) and (p.objectives[1] <= q.objectives[1])
                 p_better_strict = (p.objectives[0] < q.objectives[0]) or (p.objectives[1] < q.objectives[1])
@@ -93,7 +110,7 @@ class MultiObjectiveGP:
             i += 1
             fronts.append(next_front)
             
-        return fronts[:-1] # Remove empty last front
+        return fronts[:-1]
 
     def crowding_distance_assignment(self, front):
         l = len(front)
@@ -102,8 +119,7 @@ class MultiObjectiveGP:
         for p in front:
             p.distance = 0
             
-        for m in range(2): # 2 Objectives
-            # Sort by objective m
+        for m in range(2): 
             front.sort(key=lambda x: x.objectives[m])
             
             front[0].distance = float('inf')
@@ -116,7 +132,6 @@ class MultiObjectiveGP:
                 front[i].distance += (front[i+1].objectives[m] - front[i-1].objectives[m]) / obj_range
 
     def tournament_selection(self):
-        # Binary tournament based on Rank and Crowding Distance
         p1 = random.choice(self.population)
         p2 = random.choice(self.population)
         
@@ -124,7 +139,7 @@ class MultiObjectiveGP:
             if a.rank < b.rank: return a
             elif b.rank < a.rank: return b
             else:
-                if a.distance > b.distance: return a # Larger distance is better (less crowded)
+                if a.distance > b.distance: return a 
                 else: return b
                 
         return better(p1, p2).copy()
@@ -178,16 +193,15 @@ class MultiObjectiveGP:
     def fit(self, X_train, y_train):
         self.initialize_population()
         
-        # Evaluate initial population
         for ind in self.population:
             self.evaluate_objectives(ind, X_train, y_train)
             
-        # Initial Sort
         fronts = self.fast_non_dominated_sort(self.population)
         for front in fronts:
             self.crowding_distance_assignment(front)
             
-        for gen in tqdm(range(self.generations), desc="MOGA Generations"):
+        desc_text = f"MOGA ({self.metric.upper()})"
+        for gen in tqdm(range(self.generations), desc=desc_text):
             offspring = []
             while len(offspring) < self.pop_size:
                 p1 = self.tournament_selection()
@@ -202,10 +216,7 @@ class MultiObjectiveGP:
                 
                 offspring.extend([c1, c2])
             
-            # Combine
             combined_pop = self.population + offspring
-            
-            # Sort
             fronts = self.fast_non_dominated_sort(combined_pop)
             
             new_pop = []
@@ -214,7 +225,6 @@ class MultiObjectiveGP:
                 if len(new_pop) + len(front) <= self.pop_size:
                     new_pop.extend(front)
                 else:
-                    # Fill by crowding distance
                     front.sort(key=lambda x: x.distance, reverse=True)
                     needed = self.pop_size - len(new_pop)
                     new_pop.extend(front[:needed])
@@ -222,7 +232,6 @@ class MultiObjectiveGP:
             
             self.population = new_pop
             
-        # Final Pareto Front (Rank 0)
         final_fronts = self.fast_non_dominated_sort(self.population)
         self.pareto_front = final_fronts[0]
         

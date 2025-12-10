@@ -4,7 +4,8 @@ import math
 
 # Protected functions
 def protected_div(left, right):
-    with np.errstate(divide='ignore', invalid='ignore'):
+    # [수정] over='ignore' 추가하여 overflow 경고 억제
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
         x = np.divide(left, right)
         if isinstance(x, np.ndarray):
             x[np.isinf(x)] = 1
@@ -101,7 +102,8 @@ FUNCTIONS = {
     'sin': (np.sin, 1),
     'cos': (np.cos, 1),
     'log': (protected_log, 1),
-    'exp': (protected_exp, 1)
+    'exp': (protected_exp, 1),
+    'sqrt': (protected_sqrt, 1)
 }
 FUNC_LIST = list(FUNCTIONS.keys())
 
