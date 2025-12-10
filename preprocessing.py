@@ -8,6 +8,7 @@ from scipy.io import arff
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
+# 설정 변수
 GITHUB_RAW_BASE = 'https://raw.githubusercontent.com/klainfo/NASADefectDataset/master/CleanedData/MDP/D\'\'/'
 SAVE_DIR = './data'
 DATASET_FILES = [
@@ -17,53 +18,11 @@ DATASET_FILES = [
 ]
 FULL_PATHS = [GITHUB_RAW_BASE + f for f in DATASET_FILES]
 
-def get_common_attributes(dataset_urls):
-    """
-    제공된 모든 ARFF 파일에서 공통으로 존재하는 속성 목록을 추출합니다.
-    (각 파일의 마지막 열, 즉 타겟 변수는 제외합니다.)
-    """
-    common_cols = None
-    print("📡 모든 데이터셋의 공통 속성 목록 추출 중...")
-    
-    for full_url in dataset_urls:
-        dataset_name = os.path.basename(full_url).replace('.arff', '')
-        
-        try:
-            response = requests.get(full_url)
-            response.raise_for_status() 
-
-            content_string = response.content.decode('utf-8')
-            data_io_string = io.StringIO(content_string)
-            
-            # arff 파싱 시 데이터프레임 생성을 건너뛰고 메타데이터만 활용
-            arff_data, meta = arff.loadarff(data_io_string)
-            
-            # 마지막 컬럼(타겟 변수)을 제외한 나머지 속성 이름을 가져옵니다.
-            current_cols = set(meta.names()[:-1])
-            
-            # 공통 속성 집합 업데이트
-            if common_cols is None:
-                common_cols = current_cols
-            else:
-                common_cols = common_cols.intersection(current_cols)
-                
-            # KC4처럼 데이터가 비어있는 경우를 대비한 처리 (KC4는 속성 추출 가능)
-            if not common_cols:
-                print(f"⚠️ 경고: {dataset_name} 처리 후 공통 속성 집합이 비었습니다. (0개)")
-                return []
-                
-        except Exception as e:
-            # KC4처럼 데이터가 비어있거나 (데이터가 0개이지만 ARFF 구조는 살아있는 경우) 
-            # 파싱에 실패하면 해당 데이터셋은 공통 속성 계산에서 제외되어야 하지만,
-            # 엄격하게는 모든 데이터셋에 있어야 하므로 오류를 표시합니다.
-            print(f"❌ 오류: {dataset_name} 속성 추출 실패 ({e}). 이 데이터셋을 포함할 수 없습니다.")
-            return []
-
-    return sorted(list(common_cols))
-
-def preprocess_and_save_data(full_url, save_directory, common_features):
+def preprocess_and_save_data(full_url, save_directory):
     file_name = os.path.basename(full_url) 
     dataset_name = file_name.replace('.arff', '')
+
+    print(f"🔄 [{dataset_name}] 처리 중...")
 
     try:
         response = requests.get(full_url)
@@ -86,28 +45,50 @@ def preprocess_and_save_data(full_url, save_directory, common_features):
             print(f"⚠️ 경고: {dataset_name} 데이터셋이 비어 있습니다. 건너뜁니다.")
             return False
 
+        # 1. 중복 제거 (데이터 무결성 확보)
+        initial_count = len(df)
+        df.drop_duplicates(inplace=True)
+        final_count = len(df)
+        if initial_count != final_count:
+            print(f"   ℹ️ 중복 데이터 {initial_count - final_count}개 제거됨")
+
+        # 2. 타겟 컬럼 식별
         target_col = None
-        for name in df.columns:
-            if name in ['Defective', 'label']:
-                target_col = name
+        # 'Defective' 또는 'label' 등 타겟 변수명 후보 검색
+        possible_targets = ['Defective', 'defective', 'label', 'class']
+        for col in df.columns:
+            if col in possible_targets:
+                target_col = col
                 break
         if target_col is None:
-             target_col = df.columns[-1]
+             target_col = df.columns[-1] # 못 찾으면 마지막 컬럼을 타겟으로 가정
 
-
-        df[target_col] = df[target_col].apply(lambda x: x.decode('utf-8'))
+        # 3. 타겟 변수 인코딩 (False/True -> 0/1)
+        # 바이트 문자열인 경우 디코딩
+        if df[target_col].dtype == object and isinstance(df[target_col].iloc[0], bytes):
+            df[target_col] = df[target_col].apply(lambda x: x.decode('utf-8'))
+            
         le = LabelEncoder()
         y = pd.Series(le.fit_transform(df[target_col]), name='Defective_Encoded')
-        X_all = df.drop(columns=[target_col]).copy()
-        X = X_all[[col for col in common_features if col in X_all.columns]].copy()
-        if 'Defective_Encoded' in X.columns:
-            X = X.drop(columns=['Defective_Encoded'])
+        
+        # 4. 입력 변수(X) 분리: 해당 데이터셋에 있는 속성 그대로 사용 (독립 처리)
+        X = df.drop(columns=[target_col]).copy()
+        
+        # 5. 내부 결측치(NaN) 처리: 0으로 채우기보다 평균값 대치가 안전
+        # (각 데이터셋 내에서의 결측치이므로 평균 대치가 합리적임)
+        if X.isnull().values.any():
+            print(f"   ⚠️ 내부 결측치(NaN) 발견. 각 컬럼의 평균값으로 대치합니다.")
+            X.fillna(X.mean(), inplace=True)
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, stratify=y
-        )
+        # 6. 데이터 분할 (Stratified Split)
+        if len(y) > 1: 
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, stratify=y, random_state=42
+            )
+        else:
+            X_train, X_test, y_train, y_test = X, X, y, y
 
-        # 스케일링 dnn용
+        # 7. 스케일링 (DNN용 - 표준화)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
         X_test_scaled = scaler.transform(X_test)
@@ -116,33 +97,41 @@ def preprocess_and_save_data(full_url, save_directory, common_features):
         X_test_scaled_df = pd.DataFrame(X_test_scaled, columns=X_test.columns)
 
     except Exception as e:
-        print(f"오류: {dataset_name} 로드 및 전처리 중 오류 발생: {e}")
+        print(f"❌ 오류: {dataset_name} 전처리 로직 수행 중 실패: {e}")
+        import traceback
+        traceback.print_exc()
         return False
         
     if not os.path.exists(save_directory):
         os.makedirs(save_directory)
 
     try:
+        # 8. 저장
+        # RF/GP용 (원본 스케일)
         pd.concat([X_train.reset_index(drop=True), y_train.reset_index(drop=True)], axis=1).to_csv(os.path.join(save_directory, f'{dataset_name}_train_rf.csv'), index=False)
         pd.concat([X_test.reset_index(drop=True), y_test.reset_index(drop=True)], axis=1).to_csv(os.path.join(save_directory, f'{dataset_name}_test_rf.csv'), index=False)
         
+        # DNN용 (표준화 스케일)
         pd.concat([X_train_scaled_df.reset_index(drop=True), y_train.reset_index(drop=True)], axis=1).to_csv(os.path.join(save_directory, f'{dataset_name}_train_pt.csv'), index=False)
         pd.concat([X_test_scaled_df.reset_index(drop=True), y_test.reset_index(drop=True)], axis=1).to_csv(os.path.join(save_directory, f'{dataset_name}_test_pt.csv'), index=False)
 
-        print(f"✅ {dataset_name} 전처리 및 저장 완료.")
+        print(f"✅ {dataset_name} 완료 (속성 수: {X.shape[1]}).")
         return True
 
     except Exception as e:
-        print(f"오류: {file_name} 저장 중 오류 발생: {e}")
+        print(f"❌ 오류: {file_name} 파일 저장 실패: {e}")
         return False
 
 def run_preprocessing_pipeline(full_paths, save_directory):
-    print(f"전처리 데이터를 {save_directory}에 저장합니다.")
-
-    print("공통속성 추출")
-    commons = get_common_attributes(FULL_PATHS)
-    print("끝")
+    print(f"📂 전처리 데이터를 '{save_directory}' 폴더에 저장합니다.\n")
+    print("--- 각 데이터셋 독립 전처리 시작 ---")
+    
+    success_count = 0
     for path in full_paths:
-        preprocess_and_save_data(path, save_directory, commons)
+        if preprocess_and_save_data(path, save_directory):
+            success_count += 1
+            
+    print(f"\n🎉 총 {len(full_paths)}개 중 {success_count}개 데이터셋 처리 완료.")
 
-run_preprocessing_pipeline(FULL_PATHS, SAVE_DIR)
+if __name__ == "__main__":
+    run_preprocessing_pipeline(FULL_PATHS, SAVE_DIR)
