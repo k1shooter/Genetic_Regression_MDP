@@ -21,8 +21,8 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from evolution import MultiObjectiveGP
 from util import load_data_robust
 
-# DATASET_NAMES = ['CM1', 'JM1', 'KC1', 'KC3', 'MC1', 'MC2', 'MW1', 'PC1', 'PC2', 'PC3', 'PC4', 'PC5']
-DATASET_NAMES = ['CM1', 'JM1', 'KC1']
+DATASET_NAMES = ['CM1', 'JM1', 'KC1', 'KC3', 'MC1', 'MC2', 'MW1', 'PC1', 'PC2', 'PC3', 'PC4', 'PC5']
+#DATASET_NAMES = ['CM1', 'JM1', 'KC1']
 
 
 ######################################## 김승준 :seeding용 함수들
