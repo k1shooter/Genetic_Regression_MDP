@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef
 from tabulate import tabulate
 from util import load_data
 from datetime import datetime
@@ -41,9 +41,14 @@ def tree_to_formula(tree, feature_names=None):
 
 
 def train_and_evaluate_rf(dataset_name):
+    print(f"🌳 Processing {dataset_name}...", end=" ")
+    
+    # load_data_robust 대신 load_data 사용 (util.py)
+    # 필요 시 preprocessing.py의 독립 전처리 데이터를 사용하도록 수정 가능
     X_train, y_train, X_test, y_test = load_data(dataset_name, data_type='rf')
 
     if X_train is None:
+        print("Skipped (Data Not Found)")
         return None, []
 
     # Reduce estimators to 10 to make the output manageable but illustrative,
@@ -55,8 +60,10 @@ def train_and_evaluate_rf(dataset_name):
 
     y_pred = model.predict(X_test)
 
+    # 지표 계산
     accuracy = accuracy_score(y_test, y_pred)
     f1_defective = f1_score(y_test, y_pred, pos_label=1, average='binary', zero_division=0)
+    mcc_score = matthews_corrcoef(y_test, y_pred) # MCC 추가
 
     # Extract formulas
     formulas = []
@@ -71,7 +78,14 @@ def train_and_evaluate_rf(dataset_name):
             'Formula': formula
         })
 
-    return {'Dataset': dataset_name, 'Accuracy': accuracy, 'F1_Defective': f1_defective}, formulas
+    print(f"Done. (Acc: {accuracy:.4f}, F1: {f1_defective:.4f}, MCC: {mcc_score:.4f})")
+
+    return {
+        'Dataset': dataset_name, 
+        'Accuracy': accuracy, 
+        'F1_Score': f1_defective,
+        'MCC': mcc_score
+    }, formulas
 
 
 if __name__ == '__main__':
@@ -91,9 +105,18 @@ if __name__ == '__main__':
     version = datetime.now().strftime('%m%d_%H%M%S')
 
     if results:
-        headers = ["Dataset", "Accuracy", "F1 (Defective)"]
-        table = [[r['Dataset'], f"{r['Accuracy']:.4f}", f"{r['F1_Defective']:.4f}"] for r in results]
-        print(tabulate(table, headers=headers, tablefmt="fancy_grid"))
+        # 헤더에 MCC 추가
+        headers = ["Dataset", "Accuracy", "F1_Score", "MCC"]
+        table = [
+            [
+                r['Dataset'], 
+                f"{r['Accuracy']:.4f}", 
+                f"{r['F1_Score']:.4f}",
+                f"{r['MCC']:.4f}"
+            ] for r in results
+        ]
+        
+        print("\n" + tabulate(table, headers=headers, tablefmt="fancy_grid"))
 
         # Save metrics results to CSV
         df_res = pd.DataFrame(results)
