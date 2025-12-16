@@ -13,7 +13,8 @@ class MultiObjectiveGP:
                  crossover_rate=0.9, 
                  mutation_rate=0.1,
                  random_state=42,
-                 metric='mcc'): # metric 인자 유지
+                 metric='mcc',
+                 complexity_strategy='simple'): # [추가] 복잡도 계산 전략 ('simple' or 'weighted')
         self.n_features = n_features
         self.pop_size = pop_size
         self.generations = generations
@@ -22,6 +23,7 @@ class MultiObjectiveGP:
         self.mutation_rate = mutation_rate
         self.random_state = random_state
         self.metric = metric.lower()
+        self.complexity_strategy = complexity_strategy.lower() # [추가]
         
         random.seed(random_state)
         np.random.seed(random_state)
@@ -42,27 +44,31 @@ class MultiObjectiveGP:
             method = 'full' if random.random() < 0.5 else 'grow'
             tree = generate_tree(depth, self.n_features, method)
             self.population.append(tree)
-        #KSJ : seeds가 None일때 기존 코드 로직 유지됩니다.
 
     def evaluate_objectives(self, individual, X, y):
         """
         Fitness Function:
         1. Minimize Error (1 - Metric)
-        2. Minimize Complexity (Continuous Penalty)
+        2. Minimize Complexity (Size or Weighted Score)
         """
         try:
             logits = individual.evaluate(X)
-            # Sigmoid logic with clipping
             logits = np.clip(logits, -20, 20)
             probs = 1 / (1 + np.exp(-logits))
             preds = np.round(probs)
             
-            # 지표 계산
             f1 = f1_score(y, preds, pos_label=1, zero_division=0)
             mcc = matthews_corrcoef(y, preds)
             
             individual.f1_score = f1
             individual.mcc_score = mcc
+            
+            # 복잡도 지표 계산
+            simple_size = individual.size()
+            weighted_size = individual.weighted_size() # [추가]
+            
+            individual.size_score = simple_size
+            individual.weighted_score = weighted_size
             
             # Objective 1: 성능 (Error 최소화)
             if self.metric == 'f1':
@@ -70,19 +76,25 @@ class MultiObjectiveGP:
             else: # 'mcc'
                 obj1 = 1 - mcc
             
-            # Objective 2: 복잡도 (연속적 페널티 적용)
-            # [수정] 노드 1개당 0.02의 페널티 부여 (MCC 0.02 상승 가치와 동일)
-            # 너무 크면(0.05) 성능 포기가 심하고, 너무 작으면(0.001) 수식이 너무 복잡해짐
-            size = individual.size()
+            # Objective 2: 복잡도 최소화
+            # [수정] 전략에 따라 복잡도 기준 선택
             penalty_coefficient = 0.001 
-            obj2 = size * penalty_coefficient
+            
+            if self.complexity_strategy == 'weighted':
+                target_complexity = weighted_size
+            else: # 'simple'
+                target_complexity = simple_size
+                
+            obj2 = target_complexity * penalty_coefficient
             
             individual.objectives = (obj1, obj2)
             
         except Exception:
-            individual.objectives = (2.0, 1000.0) # Penalty
+            individual.objectives = (2.0, 1000.0)
             individual.f1_score = 0.0
             individual.mcc_score = -1.0
+            individual.size_score = 1000
+            individual.weighted_score = 1000
 
     def fast_non_dominated_sort(self, population):
         fronts = [[]]
@@ -91,7 +103,6 @@ class MultiObjectiveGP:
             p.dominated_solutions = []
             
             for q in population:
-                # p dominates q if p is better or equal in all objectives AND strictly better in at least one
                 p_better_eq = (p.objectives[0] <= q.objectives[0]) and (p.objectives[1] <= q.objectives[1])
                 p_better_strict = (p.objectives[0] < q.objectives[0]) or (p.objectives[1] < q.objectives[1])
                 
@@ -207,7 +218,7 @@ class MultiObjectiveGP:
         for front in fronts:
             self.crowding_distance_assignment(front)
             
-        desc_text = f"MOGA ({self.metric.upper()})"
+        desc_text = f"MOGA ({self.metric.upper()} | {self.complexity_strategy.upper()})"
         for gen in tqdm(range(self.generations), desc=desc_text):
             offspring = []
             while len(offspring) < self.pop_size:

@@ -23,7 +23,7 @@ print(f"⚡ Using Device: {device}")
 
 def load_data_strategy(dataset_name, data_type='rf'):
     """독립 전처리 데이터 로드"""
-    base_paths = ['./data', '../data']
+    base_paths = ['./data', '../data', '../../data']
     for base in base_paths:
         train_path = os.path.join(base, f'{dataset_name}_train_{data_type}.csv')
         test_path = os.path.join(base, f'{dataset_name}_test_{data_type}.csv')
@@ -63,7 +63,6 @@ def objective(trial, model_type, datasets):
         }
 
     for _, (X, y, _, _) in datasets.items():
-        # 데이터가 너무 적으면(배치 크기보다 작으면) 건너뛰거나 학습용으로만 사용
         if len(y) < params.get('batch', 32): 
             continue
 
@@ -82,14 +81,10 @@ def objective(trial, model_type, datasets):
             y_t = torch.tensor(y_tr.values, dtype=torch.float32).unsqueeze(1).to(device)
             X_v = torch.tensor(X_val.values, dtype=torch.float32).to(device)
             
-            # [수정] drop_last=True로 설정하여 배치 크기가 1인 경우 방지 (BatchNorm 오류 해결)
             loader = DataLoader(TensorDataset(X_t, y_t), batch_size=params['batch'], shuffle=True, drop_last=True)
-            
-            # 데이터가 너무 적어 배치가 하나도 안 만들어지면 건너뜀
             if len(loader) == 0: continue
 
             model = DefectClassifier(X.shape[1], params['hidden'], dropout_rate=params['dropout']).to(device)
-            
             pos_weight = torch.tensor([(len(y_tr)-y_tr.sum())/y_tr.sum() if y_tr.sum()>0 else 1.0]).to(device)
             opt = optim.Adam(model.parameters(), lr=params['lr'], weight_decay=params['decay'])
             crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
@@ -108,22 +103,30 @@ def objective(trial, model_type, datasets):
 
 def evaluate_and_save(model_type, best_params, datasets):
     results = []
+    print(f"\n📊 Evaluating Best {model_type.upper()} Model...")
+    
     for name, (X_tr, y_tr, X_te, y_te) in datasets.items():
+        cplx = 0
+        w_cplx = 0
+        
         if model_type == 'rf':
             model = RandomForestClassifier(**best_params, class_weight='balanced', n_jobs=-1, random_state=42)
             model.fit(X_tr, y_tr)
             pred = model.predict(X_te)
+            
+            # [RF Only] 복잡도 계산: 평균 노드 수
+            total_nodes = sum([est.tree_.node_count for est in model.estimators_])
+            cplx = total_nodes / len(model.estimators_)
+            w_cplx = cplx # RF는 가중치 구분 없음
+            
         else:
+            # DNN Evaluation
             X_t = torch.tensor(X_tr.values, dtype=torch.float32).to(device)
             y_t = torch.tensor(y_tr.values, dtype=torch.float32).unsqueeze(1).to(device)
             X_te_t = torch.tensor(X_te.values, dtype=torch.float32).to(device)
             
-            # [수정] 평가 단계에서도 drop_last=True (학습 시 문제였지만, 일관성 유지)
-            # 사실 평가는 model.eval() 상태라 drop_last=False여도 되지만, 
-            # 학습 루프와 동일한 데이터 로더 설정을 유지합니다.
             loader = DataLoader(TensorDataset(X_t, y_t), batch_size=best_params['batch'], shuffle=True, drop_last=True)
             
-            # 데이터가 너무 적은 경우 예외 처리
             if len(loader) == 0:
                 print(f"⚠️ {name}: 데이터 부족으로 학습 건너뜀")
                 continue
@@ -142,20 +145,33 @@ def evaluate_and_save(model_type, best_params, datasets):
             model.eval()
             with torch.no_grad():
                 pred = torch.round(torch.sigmoid(model(X_te_t))).cpu().numpy()
-                
+            
+            # [DNN] 복잡도 계산 안 함 (0 처리)
+            cplx = 0
+            w_cplx = 0
+        
+        # [Fix] Dictionary Keys Must Match Headers ('Cplx', 'W_Cplx')
         results.append({
             'Dataset': name,
             'Acc': accuracy_score(y_te, pred),
             'F1': f1_score(y_te, pred, pos_label=1, zero_division=0),
-            'MCC': matthews_corrcoef(y_te, pred)
+            'MCC': matthews_corrcoef(y_te, pred),
+            'Cplx': cplx,      # 키 이름 일치시킴
+            'W_Cplx': w_cplx   # 키 이름 일치시킴
         })
     
     df = pd.DataFrame(results)
-    print(tabulate(df, headers='keys', tablefmt='fancy_grid', floatfmt=".4f"))
-    df.to_csv(f"optuna_{model_type}_results.csv", index=False)
+    
+    # 출력 포맷
+    headers = ['Dataset', 'Acc', 'F1', 'MCC', 'Cplx', 'W_Cplx']
+    print(tabulate(df[headers], headers=headers, tablefmt='fancy_grid', floatfmt=".4f"))
+    
+    filename = f"optuna_{model_type}_results.csv"
+    df.to_csv(filename, index=False)
+    print(f"💾 결과 저장: {filename}")
 
 if __name__ == '__main__':
-    print("="*60 + "\n🔥 RF & DNN Optimization (Target: MCC)\n" + "="*60)
+    print("="*60 + "\n🔥 RF & DNN Optimization (Target: MCC) with Complexity\n" + "="*60)
     
     # 1. RF Tuning
     rf_data = load_all_datasets('rf')

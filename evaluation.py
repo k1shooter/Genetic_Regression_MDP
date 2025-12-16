@@ -14,7 +14,7 @@ def find_latest_result(pattern):
     return max(files, key=os.path.getctime)
 
 def standardize_columns(df):
-    """다양한 이름의 컬럼을 표준 이름(Acc, F1, MCC)으로 변경합니다."""
+    """다양한 이름의 컬럼을 표준 이름으로 변경합니다."""
     if df.empty: return df
     
     # 공백 제거
@@ -34,8 +34,9 @@ def standardize_columns(df):
         'DNN_MCC': 'MCC', 'RF_MCC': 'MCC',
         'MCC Score': 'MCC',
         
-        # Others
-        'Complexity': 'Cplx'
+        # Complexity
+        'Complexity': 'Cplx',
+        'Weighted_Cplx': 'W_Cplx'
     }
     
     # rename 적용
@@ -46,7 +47,36 @@ def standardize_columns(df):
         if col not in df.columns:
             df[col] = 0.0
             
+    # 복잡도 컬럼 초기화
+    for col in ['Cplx', 'W_Cplx']:
+        if col not in df.columns:
+            if col == 'W_Cplx' and 'Cplx' in df.columns:
+                 df['W_Cplx'] = df['Cplx'] # W_Cplx가 없으면 Cplx 복사
+            else:
+                 df[col] = 0.0
+            
     return df
+
+def load_chirps_formulas():
+    """CHIRPS(Piecewise)로 생성된 수식 파일을 로드하여 데이터셋별로 매핑합니다."""
+    base_dir = "analysis_results/Piecewise"
+    formula_map = {}
+    
+    if not os.path.exists(base_dir):
+        return formula_map
+        
+    for dataset_name in os.listdir(base_dir):
+        path = os.path.join(base_dir, dataset_name, "piecewise_formulas_metrics.csv")
+        if os.path.exists(path):
+            try:
+                df = pd.read_csv(path)
+                if not df.empty:
+                    # 중요도(Importance)가 가장 높은 Feature의 수식을 대표값으로 선정
+                    top_feature = df.sort_values(by='Importance', ascending=False).iloc[0]
+                    formula_map[dataset_name] = f"[{top_feature['Feature']}] {top_feature['Formula']}"
+            except Exception:
+                pass
+    return formula_map
 
 def load_results():
     """각 모델의 최신 결과 파일을 로드하여 통합합니다."""
@@ -60,6 +90,7 @@ def load_results():
         dnn_df = pd.read_csv(dnn_file)
         dnn_df = standardize_columns(dnn_df)
         dnn_df['Model'] = 'DNN (Tuned)'
+        dnn_df['Strategy'] = '-' 
         dfs.append(dnn_df)
     else:
         print("⚠️ DNN 결과 파일 없음")
@@ -70,31 +101,21 @@ def load_results():
         rf_df = pd.read_csv(rf_file)
         rf_df = standardize_columns(rf_df)
         rf_df['Model'] = 'RF (Tuned)'
+        rf_df['Strategy'] = '-'
         dfs.append(rf_df)
     else:
         print("⚠️ RF 결과 파일 없음")
 
-    # 3. Naive Bayes
-    nb_file = find_latest_result("naive_bayes_results_*.csv")
-    if nb_file:
-        nb_df = pd.read_csv(nb_file)
-        nb_df = standardize_columns(nb_df)
-        nb_df['Model'] = 'Naive Bayes'
-        dfs.append(nb_df)
-    else:
-        print("⚠️ Naive Bayes 결과 파일 없음")
-
-    # 4. GP (GA-MO)
+    # 3. GP (GA-MO)
     gp_file = find_latest_result("ga_mo_results_*.csv")
     if gp_file:
         gp_raw = pd.read_csv(gp_file)
         gp_raw = standardize_columns(gp_raw)
         
-        # Target이 있다면 MCC 최적화 결과 우선, 없으면 MCC 점수 높은 순
+        # Dataset별 MCC가 가장 높은 모델 하나만 선택
         if 'Target' in gp_raw.columns:
             mcc_target = gp_raw[gp_raw['Target'].str.upper() == 'MCC']
             if not mcc_target.empty:
-                # 데이터셋별 최고 성능 1개만 추출 (모델 대표값)
                 gp_best = mcc_target.sort_values(['Dataset', 'MCC'], ascending=[True, False]).drop_duplicates('Dataset')
             else:
                 gp_best = gp_raw.sort_values(['Dataset', 'MCC'], ascending=[True, False]).drop_duplicates('Dataset')
@@ -103,6 +124,10 @@ def load_results():
             
         gp_df = gp_best.copy()
         gp_df['Model'] = 'GP (Ours)'
+        
+        if 'Strategy' not in gp_df.columns:
+            gp_df['Strategy'] = 'Simple' 
+            
         dfs.append(gp_df)
     else:
         print("⚠️ GP 결과 파일 없음")
@@ -114,19 +139,18 @@ def load_results():
     all_df = pd.concat(dfs, ignore_index=True)
     
     # 필요한 컬럼만 남기고, NaN은 0으로 채움
-    cols = ['Dataset', 'Model', 'Acc', 'F1', 'MCC', 'Cplx', 'Formula']
+    cols = ['Dataset', 'Model', 'Strategy', 'Acc', 'F1', 'MCC', 'Cplx', 'W_Cplx', 'Formula']
     for col in cols:
         if col not in all_df.columns:
             all_df[col] = pd.NA
             
-    # 숫자형 컬럼 결측치 0 처리
-    num_cols = ['Acc', 'F1', 'MCC']
+    num_cols = ['Acc', 'F1', 'MCC', 'Cplx', 'W_Cplx']
     all_df[num_cols] = all_df[num_cols].fillna(0.0)
     
     return all_df
 
 def plot_comparison(df):
-    """모델별 성능 비교 그래프 생성 및 저장"""
+    """모델별 성능 비교 그래프"""
     if df.empty: return
 
     save_dir = "comparison_plots"
@@ -155,126 +179,150 @@ def plot_comparison(df):
         plt.close()
         print(f"📊 {metric} 비교 그래프 저장 완료: {filename}")
 
-def get_best_models_df(df):
-    """각 데이터셋별 MCC, F1 최고 모델을 찾아 컬럼으로 추가"""
-    # Dataset별로 그룹화
-    grouped = df.groupby('Dataset')
-    
-    best_mcc_map = {}
-    best_f1_map = {}
-    
-    for name, group in grouped:
-        # MCC Best (동점자 포함)
-        max_mcc = group['MCC'].max()
-        winners_mcc = group[group['MCC'] == max_mcc]['Model'].tolist()
-        best_mcc_map[name] = ", ".join(winners_mcc)
-        
-        # F1 Best (동점자 포함)
-        max_f1 = group['F1'].max()
-        winners_f1 = group[group['F1'] == max_f1]['Model'].tolist()
-        best_f1_map[name] = ", ".join(winners_f1)
-        
-    # 원본 df에 매핑 (1등 정보 추가)
-    df['Best Model (MCC)'] = df['Dataset'].map(best_mcc_map)
-    df['Best Model (F1)'] = df['Dataset'].map(best_f1_map)
-    
-    return df
-
-def print_summary(df):
-    """최종 요약 테이블 출력 및 저장"""
-    if df.empty: return
-
-    print("\n" + "="*100)
-    print("🏆 Final Performance Summary (All Models with Winner Info)")
-    print("="*100)
-    
-    # Best Model 정보 추가
-    df = get_best_models_df(df)
-    
-    # 출력용 컬럼 순서 지정
-    display_cols = ['Dataset', 'Model', 'Acc', 'F1', 'MCC', 'Best Model (MCC)', 'Best Model (F1)']
-    
-    # 정렬: Dataset 이름순 -> MCC 내림차순
-    df_sorted = df.sort_values(by=['Dataset', 'MCC'], ascending=[True, False])
-    
-    # 데이터 포맷팅
-    table_data = []
-    for _, row in df_sorted.iterrows():
-        table_data.append([
-            row['Dataset'],
-            row['Model'],
-            f"{float(row['Acc']):.4f}",
-            f"{float(row['F1']):.4f}",
-            f"{float(row['MCC']):.4f}",
-            row['Best Model (MCC)'],
-            row['Best Model (F1)']
-        ])
-        
-    # 화면 출력
-    print(tabulate(table_data, headers=display_cols, tablefmt="fancy_grid"))
-    
-    # CSV 저장
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # 저장할 때는 수식 정보도 포함
-    save_cols = display_cols + ['Cplx', 'Formula']
-    valid_cols = [c for c in save_cols if c in df.columns]
-    
-    filename = f"final_evaluation_summary_{timestamp}.csv"
-    df_sorted[valid_cols].to_csv(filename, index=False)
-    print(f"\n💾 전체 상세 결과 저장 완료: {filename}")
-
-    compare_formulas(df)
-
-def compare_formulas(df):
+def print_performance_analysis(df):
+    """[Part 1] 성능 분석 테이블 출력"""
     print("\n" + "="*80)
-    print("🔍 Interpretability Comparison: GP vs RF (Simple Tree)")
+    print("🏆 Performance Analysis")
     print("="*80)
-    
-    # GP 수식
-    gp_df = df[df['Model'] == 'GP (Ours)']
-    
-    # RF 수식 (별도 파일에서 로드)
-    rf_file = find_latest_result("random_forest_formulas_*.csv")
-    rf_df = pd.DataFrame()
-    if rf_file:
-        try:
-            rf_raw = pd.read_csv(rf_file)
-            if not rf_raw.empty:
-                rf_df = rf_raw[rf_raw['Tree_Index'] == 0][['Dataset', 'Formula']].rename(columns={'Formula': 'RF_Formula'})
-        except: pass
 
-    # 데이터셋 리스트
+    cols = ['Dataset', 'Model', 'Acc', 'F1', 'MCC']
+
+    # 1. MCC 기준 정렬 테이블
+    print("\n📌 Table 1: Ranked by MCC (Descending)")
+    df_mcc = df.sort_values(by=['Dataset', 'MCC'], ascending=[True, False])
+    print(tabulate(df_mcc[cols], headers=cols, tablefmt='simple', floatfmt=".4f"))
+
+    # 2. F1 기준 정렬 테이블
+    print("\n📌 Table 2: Ranked by F1 (Descending)")
+    df_f1 = df.sort_values(by=['Dataset', 'F1'], ascending=[True, False])
+    print(tabulate(df_f1[cols], headers=cols, tablefmt='simple', floatfmt=".4f"))
+
+    # 3. Best Model 요약 테이블
+    print("\n📌 Table 3: Best Models per Dataset (Performance)")
+    
+    summary_data = []
     datasets = sorted(df['Dataset'].unique())
     
     for ds in datasets:
-        print(f"\n📌 Dataset: {ds}")
+        subset = df[df['Dataset'] == ds]
+        if subset.empty: continue
         
-        # GP Formula 출력
+        # Best MCC
+        best_mcc_val = subset['MCC'].max()
+        best_mcc_models = subset[subset['MCC'] == best_mcc_val]['Model'].tolist()
+        best_mcc_str = ", ".join(best_mcc_models) + f" ({best_mcc_val:.3f})"
+        
+        # Best F1
+        best_f1_val = subset['F1'].max()
+        best_f1_models = subset[subset['F1'] == best_f1_val]['Model'].tolist()
+        best_f1_str = ", ".join(best_f1_models) + f" ({best_f1_val:.3f})"
+        
+        summary_data.append([ds, best_f1_str, best_mcc_str])
+        
+    headers = ["Dataset", "Best Model (F1)", "Best Model (MCC)"]
+    print(tabulate(summary_data, headers=headers, tablefmt="fancy_grid"))
+
+def print_interpretability_analysis(df):
+    """[Part 2] 해석 가능성 및 복잡도 분석"""
+    print("\n" + "="*80)
+    print("🔍 Interpretability & Complexity Comparison")
+    print("="*80)
+    
+    # --- [추가] Best Complexity Model 계산 (DNN 제외) ---
+    df_comparable = df[~df['Model'].str.contains("DNN", na=False)].copy()
+    grouped = df_comparable.groupby('Dataset')
+    
+    best_cplx_map = {}
+    best_wcplx_map = {}
+    
+    for name, group in grouped:
+        # Min Cplx
+        min_cplx = group['Cplx'].min()
+        winners_cplx = group[group['Cplx'] == min_cplx]['Model'].tolist()
+        best_cplx_map[name] = ", ".join(winners_cplx)
+        
+        # Min W_Cplx
+        min_wcplx = group['W_Cplx'].min()
+        winners_wcplx = group[group['W_Cplx'] == min_wcplx]['Model'].tolist()
+        best_wcplx_map[name] = ", ".join(winners_wcplx)
+
+    # 1. 복잡도 테이블
+    print("\n📌 Table 4: Complexity Metrics")
+    cplx_data = []
+    
+    # Dataset별, 모델별 정렬
+    df_sorted = df.sort_values(by=['Dataset', 'Model'])
+    
+    for _, row in df_sorted.iterrows():
+        ds_name = row['Dataset']
+        
+        # DNN은 제외할 수도 있지만, 표에는 '-'로 표시해서 명시
+        if "DNN" in str(row['Model']):
+            c_val, w_val = "-", "-"
+        else:
+            c_val = f"{float(row['Cplx']):.1f}"
+            w_val = f"{float(row['W_Cplx']):.1f}"
+            
+        best_c = best_cplx_map.get(ds_name, "-")
+        best_wc = best_wcplx_map.get(ds_name, "-")
+        
+        cplx_data.append([ds_name, row['Model'], c_val, w_val, best_c, best_wc])
+        
+    headers = ["Dataset", "Model", "Cplx", "W_Cplx", "Best (Cplx)", "Best (W_Cplx)"]
+    print(tabulate(cplx_data, headers=headers, tablefmt="fancy_grid"))
+
+    # 2. 수식 비교 (Formula)
+    print("\n📌 Formula Comparison (GP vs RF)")
+    
+    gp_df = df[df['Model'] == 'GP (Ours)']
+    rf_df = df[df['Model'] == 'RF (Tuned)']
+    chirps_formulas = load_chirps_formulas()
+    
+    datasets = sorted(df['Dataset'].unique())
+    
+    for ds in datasets:
+        print(f"\n Dataset: {ds}")
+        
+        # --- GP 출력 ---
         gp_row = gp_df[gp_df['Dataset'] == ds]
-        if not gp_row.empty and pd.notna(gp_row.iloc[0]['Formula']):
+        if not gp_row.empty:
             cplx = gp_row.iloc[0]['Cplx']
+            w_cplx = gp_row.iloc[0]['W_Cplx']
             form = gp_row.iloc[0]['Formula']
-            print(f"   [GP] (Cplx: {cplx}): {form}")
+            if pd.isna(form): form = "-"
+            
+            print(f"   [GP] Complexity: Cplx:{cplx:.1f} | W_cplx:{w_cplx:.1f}")
+            print(f"            Formula: {form}")
         else:
             print("   [GP] -")
             
-        # RF Formula 출력
-        if not rf_df.empty:
-            rf_row = rf_df[rf_df['Dataset'] == ds]
-            if not rf_row.empty and pd.notna(rf_row.iloc[0]['RF_Formula']):
-                rf_f = str(rf_row.iloc[0]['RF_Formula'])
-                if len(rf_f) > 100: rf_f = rf_f[:97] + "..."
-                print(f"   [RF] (Tree #0): {rf_f}")
-            else:
-                print("   [RF] -")
+        # --- RF (CHIRPS) 출력 ---
+        rf_row = rf_df[rf_df['Dataset'] == ds]
+        rf_cplx_str = "-"
+        if not rf_row.empty:
+            rf_cplx_str = f"{rf_row.iloc[0]['Cplx']:.1f}"
+            
+        rf_formula_str = "-"
+        if ds in chirps_formulas:
+            rf_formula_str = chirps_formulas[ds]
         else:
-            print("   [RF] -")
+            rf_formula_str = "(No CHIRPS rule found)"
+            
+        print(f"   [RF] Complexity: Cplx:{rf_cplx_str}")
+        print(f"            Formula: {rf_formula_str}")
 
 if __name__ == "__main__":
     final_df = load_results()
     
     if not final_df.empty:
         plot_comparison(final_df)
-        print_summary(final_df)
+        print_performance_analysis(final_df)
+        print_interpretability_analysis(final_df)
+        
+        # 전체 데이터 CSV 저장
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"final_evaluation_summary_{timestamp}.csv"
+        final_df.to_csv(filename, index=False)
+        print(f"\n💾 전체 통합 결과 저장: {filename}")
     else:
         print("❌ 분석할 데이터가 없습니다.")
