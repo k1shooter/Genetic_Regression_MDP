@@ -103,19 +103,6 @@ def train_and_evaluate_rf(dataset_name):
     total_nodes = sum([estimator.tree_.node_count for estimator in model.estimators_])
     avg_nodes = total_nodes / n_estimators
 
-    # 수식 추출
-    formulas = []
-    weight = 1.0 / n_estimators
-
-    for idx, estimator in enumerate(model.estimators_):
-        formula = tree_to_formula(estimator)
-        formulas.append({
-            'Dataset': dataset_name,
-            'Tree_Index': idx,
-            'Weight': weight,
-            'Formula': formula
-        })
-
     print(f"Done. (Thresh: {best_thresh:.2f} | Acc: {accuracy:.4f}, F1: {f1_defective:.4f}, MCC: {mcc_score:.4f})")
 
     return {
@@ -125,21 +112,19 @@ def train_and_evaluate_rf(dataset_name):
         'MCC': mcc_score,
         'Complexity': avg_nodes,
         'Threshold': best_thresh # 결과 확인용
-    }, formulas
+    }
 
 if __name__ == '__main__':
     results = []
-    all_formulas = []
 
     print("=" * 80)
     print("🌳 Optimized RF Analysis with Threshold Tuning")
     print("=" * 80)
 
     for name in DATASET_NAMES:
-        metrics, formulas = train_and_evaluate_rf(name)
+        metrics = train_and_evaluate_rf(name)
         if metrics:
             results.append(metrics)
-            all_formulas.extend(formulas)
 
     version = datetime.now().strftime('%m%d_%H%M%S')
 
@@ -162,7 +147,3 @@ if __name__ == '__main__':
         df_res = pd.DataFrame(results)
         df_res.to_csv(f'random_forest_results_{version}.csv', index=False)
         print(f"\n💾 성능 결과가 'random_forest_results_{version}.csv'에 저장되었습니다.")
-
-        if all_formulas:
-            df_formulas = pd.DataFrame(all_formulas)
-            df_formulas.to_csv(f'random_forest_formulas_{version}.csv', index=False)
