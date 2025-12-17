@@ -5,3 +5,6 @@ data/
 # uv
 /.python-version
 /pyproject.toml
+
+# python
+__pycache__
