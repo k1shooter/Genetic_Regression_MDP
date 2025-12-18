@@ -6,7 +6,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef
-from util import load_data
+try:
+    from classifiers.util import load_data
+except ImportError:
+    from util import load_data
+    
 from datetime import datetime
 import warnings
 
