@@ -8,6 +8,41 @@
 
 [NASA Defect Dataset (klainfo/NASADefectDataset)](https://github.com/klainfo/NASADefectDataset)
 
+## 🚀 실행 방법
+
+1) 데이터 로드 및 preprocessing
+
+```
+python preprocessing.py
+```
+
+2) 기존 classifier 실행
+
+```commandline
+# 2-1. DNN + optuna & Random Forest + optuna
+python classifiers/optuna_tuning.py
+```
+```
+# 2-2. Random Forest + CHIRPS
+python classifiers/chirps_full.py
+```
+```
+# 2-3. Naive Bayes
+classifiers/naive_bayes.py
+```
+
+3) GA algorithm 으로 수식 생성
+
+```commandline
+python ga_mo/main.py
+```
+
+4) 성능 최종비교
+
+```commandline
+python evaluation.py
+```
+
 ## 🧩 Tree Complexity & Optimization
 
 본 프로젝트에서는 결함 예측 모델의 성능뿐만 아니라 **설명 가능성(Explainability)**과 **일반화(Generalizability)**를 확보하기 위해 **Tree Complexity(트리 복잡도)**를 최소화하는 것을 중요한 목표로 삼았습니다.
