@@ -25,3 +25,5 @@ networkx==3.4.2
 matplotlib
 mlxtend
 seaborn
+optuna
+imbalanced-learn
