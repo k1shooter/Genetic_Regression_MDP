@@ -7,4 +7,5 @@ data/
 /pyproject.toml
 
 # python
-__pycache__/
+classifiers/__pycache__/*
+ga_mo/__pycache__/*

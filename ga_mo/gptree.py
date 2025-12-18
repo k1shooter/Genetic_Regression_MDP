@@ -2,7 +2,7 @@ import numpy as np
 import random
 import math
 
-# Protected functions
+# Protected functions (안전한 연산)
 def protected_div(left, right):
     with np.errstate(divide='ignore', invalid='ignore', over='ignore'):
         x = np.divide(left, right)
@@ -25,41 +25,34 @@ def protected_log(x):
             res = 0
     return res
 
-def protected_exp(x):
-    with np.errstate(over='ignore', invalid='ignore'):
-        res = np.exp(x)
-        limit = 1e9
-        if isinstance(res, np.ndarray):
-            res[res > limit] = limit
-            res[np.isinf(res)] = limit
-            res[np.isnan(res)] = 0
-        elif res > limit or np.isinf(res):
-            res = limit
-    return res
-
 def protected_sqrt(x):
     return np.sqrt(np.abs(x))
 
-# Primitives
+# [추가] Max, Min (비선형 경계 생성에 유리)
+def protected_max(left, right):
+    return np.maximum(left, right)
+
+def protected_min(left, right):
+    return np.minimum(left, right)
+
+# [최적화] sin, cos 제거, max, min 추가
 FUNCTIONS = {
     'add': (np.add, 2),
     'sub': (np.subtract, 2),
     'mul': (np.multiply, 2),
     'div': (protected_div, 2),
-    'sin': (np.sin, 1),
-    'cos': (np.cos, 1),
+    'max': (protected_max, 2), # New
+    'min': (protected_min, 2), # New
     'log': (protected_log, 1),
-    'exp': (protected_exp, 1),
     'sqrt': (protected_sqrt, 1)
 }
 FUNC_LIST = list(FUNCTIONS.keys())
 
-# [추가] 연산자별 인지적 복잡도 가중치 (Interpretability Analysis용)
+# 복잡도 가중치
 OP_COMPLEXITY = {
-    'add': 1, 'sub': 1,          # 쉬움
-    'mul': 2, 'div': 3,          # 보통
-    'sin': 3, 'cos': 3, 'sqrt': 3, # 조금 어려움
-    'log': 4, 'exp': 4           # 어려움
+    'add': 1, 'sub': 1, 'max': 1, 'min': 1,
+    'mul': 2, 'div': 3,
+    'sqrt': 3, 'log': 4
 }
 
 class Node:
@@ -70,7 +63,10 @@ class Node:
         self.is_terminal = (func is None)
         self._size = None
         self._height = None
-        self._weighted_size = None # 캐싱용 변수 추가
+        self._weighted_size = None
+        
+        # [추가] 최적 임계값 저장 속성
+        self.best_threshold = 0.5 
 
     def __str__(self):
         if self.is_terminal:
@@ -89,6 +85,7 @@ class Node:
     def evaluate(self, X):
         if self.is_terminal:
             if isinstance(self.val, int):
+                # Numpy 배열 처리
                 return X[:, self.val]
             else:
                 return np.full(X.shape[0], self.val)
@@ -109,23 +106,21 @@ class Node:
             self._size = 1 + sum(c.size() for c in self.children)
         return self._size
     
-    # [추가] 가중치 기반 복잡도 계산 함수
     def weighted_size(self):
         if self._weighted_size is None:
-            cost = 1 # 기본 터미널/노드 비용
+            cost = 1 
             if not self.is_terminal:
-                # 함수 이름 추출 (protected_ 접두사 제거 로직 등 고려)
                 fname = self.func.__name__.replace('protected_', '')
-                # wrapper 함수 처리 등으로 인해 이름 매칭이 안 될 경우 기본값 1 적용
                 cost = OP_COMPLEXITY.get(fname, 1)
-                
             child_cost = sum(c.weighted_size() for c in self.children)
             self._weighted_size = cost + child_cost
         return self._weighted_size
 
     def copy(self):
         new_children = [c.copy() for c in self.children]
-        return Node(self.val, self.func, new_children)
+        new_node = Node(self.val, self.func, new_children)
+        new_node.best_threshold = self.best_threshold
+        return new_node
 
 def random_terminal(n_features, const_range=(-10, 10)):
     if random.random() < 0.7:
