@@ -14,7 +14,7 @@ class MultiObjectiveGP:
                  mutation_rate=0.1,
                  random_state=42,
                  metric='mcc',
-                 complexity_strategy='simple'): # [추가] 복잡도 계산 전략 ('simple' or 'weighted')
+                 complexity_strategy='simple'):
         self.n_features = n_features
         self.pop_size = pop_size
         self.generations = generations
@@ -23,7 +23,7 @@ class MultiObjectiveGP:
         self.mutation_rate = mutation_rate
         self.random_state = random_state
         self.metric = metric.lower()
-        self.complexity_strategy = complexity_strategy.lower() # [추가]
+        self.complexity_strategy = complexity_strategy.lower()
         
         random.seed(random_state)
         np.random.seed(random_state)
@@ -33,66 +33,89 @@ class MultiObjectiveGP:
 
     def initialize_population(self, seeds=None):
         self.population = []
-        
         if seeds:
-            print(f"🌱 Seeding {len(seeds)} trees...")
             for seed_tree in seeds:
                 self.population.append(seed_tree.copy())
         
         while len(self.population) < self.pop_size:
-            depth = random.randint(1, self.max_depth)
+            depth = random.randint(2, self.max_depth)
             method = 'full' if random.random() < 0.5 else 'grow'
             tree = generate_tree(depth, self.n_features, method)
             self.population.append(tree)
 
     def evaluate_objectives(self, individual, X, y):
         """
-        Fitness Function:
-        1. Minimize Error (1 - Metric)
-        2. Minimize Complexity (Size or Weighted Score)
+        [성능 개선 핵심] Dynamic Thresholding
+        각 수식마다 데이터에 가장 잘 맞는 임계값을 찾아서 평가함.
         """
         try:
             logits = individual.evaluate(X)
+            
+            # 수치 안정성 체크
+            if np.isnan(logits).any() or np.isinf(logits).any():
+                raise ValueError("Numerical instability")
+
             logits = np.clip(logits, -20, 20)
             probs = 1 / (1 + np.exp(-logits))
-            preds = np.round(probs)
             
-            f1 = f1_score(y, preds, pos_label=1, zero_division=0)
-            mcc = matthews_corrcoef(y, preds)
+            # --- Threshold Tuning ---
+            best_thresh = 0.5
+            best_score = -1.0
+            
+            # 0.05 ~ 0.95 사이에서 최적의 임계값 탐색
+            thresholds = np.linspace(0.05, 0.95, 19)
+            
+            for th in thresholds:
+                preds = (probs >= th).astype(int)
+                
+                # 모든 예측이 0 또는 1이면 점수 0 처리 (무의미한 예측)
+                if np.sum(preds) == 0 or np.sum(preds) == len(y):
+                    score = 0.0
+                else:
+                    if self.metric == 'f1':
+                        score = f1_score(y, preds, pos_label=1, zero_division=0)
+                    else:
+                        score = matthews_corrcoef(y, preds)
+                
+                if score > best_score:
+                    best_score = score
+                    best_thresh = th
+            
+            # 최적 임계값 저장 (나중에 Test 평가 시 사용)
+            individual.best_threshold = best_thresh
+            
+            # 최종 점수 계산
+            final_preds = (probs >= best_thresh).astype(int)
+            f1 = f1_score(y, final_preds, pos_label=1, zero_division=0)
+            mcc = matthews_corrcoef(y, final_preds)
             
             individual.f1_score = f1
             individual.mcc_score = mcc
             
-            # 복잡도 지표 계산
-            simple_size = individual.size()
-            weighted_size = individual.weighted_size() # [추가]
-            
-            individual.size_score = simple_size
-            individual.weighted_score = weighted_size
-            
-            # Objective 1: 성능 (Error 최소화)
+            # Objective 1: 성능 (Minimize Error)
             if self.metric == 'f1':
                 obj1 = 1 - f1
-            else: # 'mcc'
+            else:
                 obj1 = 1 - mcc
             
-            # Objective 2: 복잡도 최소화
-            # [수정] 전략에 따라 복잡도 기준 선택
-            penalty_coefficient = 0.001 
-            
+            # Objective 2: 복잡도
             if self.complexity_strategy == 'weighted':
-                target_complexity = weighted_size
-            else: # 'simple'
-                target_complexity = simple_size
-                
-            obj2 = target_complexity * penalty_coefficient
+                cplx = individual.weighted_size()
+            else:
+                cplx = individual.size()
+            
+            individual.size_score = individual.size()
+            individual.weighted_score = individual.weighted_size()
+            
+            # 복잡도 페널티
+            obj2 = cplx * 0.002
             
             individual.objectives = (obj1, obj2)
             
         except Exception:
             individual.objectives = (2.0, 1000.0)
             individual.f1_score = 0.0
-            individual.mcc_score = -1.0
+            individual.mcc_score = 0.0
             individual.size_score = 1000
             individual.weighted_score = 1000
 
@@ -134,12 +157,10 @@ class MultiObjectiveGP:
         l = len(front)
         if l == 0: return
         
-        for p in front:
-            p.distance = 0
+        for p in front: p.distance = 0
             
         for m in range(2): 
             front.sort(key=lambda x: x.objectives[m])
-            
             front[0].distance = float('inf')
             front[l-1].distance = float('inf')
             
@@ -218,7 +239,7 @@ class MultiObjectiveGP:
         for front in fronts:
             self.crowding_distance_assignment(front)
             
-        desc_text = f"MOGA ({self.metric.upper()} | {self.complexity_strategy.upper()})"
+        desc_text = f"MOGA ({self.metric.upper()})"
         for gen in tqdm(range(self.generations), desc=desc_text):
             offspring = []
             while len(offspring) < self.pop_size:

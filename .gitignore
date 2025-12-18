@@ -7,4 +7,4 @@ data/
 /pyproject.toml
 
 # python
-__pycache__/
+__pycache__/*

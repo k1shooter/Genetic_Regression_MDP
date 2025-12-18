@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath("ga_mo"))
 
 # 메인 실행 로직 및 클래스 로드
 try:
-    import ga_mo.main as main_script        # 실행 로직 (run_mo_ga_on_dataset 등)
+    import ga_mo.main_multi_metric as main_script        # 실행 로직 (run_mo_ga_on_dataset 등)
     import ga_mo.evolution as std_class     # 일반 GP 클래스 (Standard, Seeding)
     import ga_mo.rl_gep as rl_class         # RL GP 클래스 (RL, RL+Seeding)
     from ga_mo.gptree import Node, FUNCTIONS
