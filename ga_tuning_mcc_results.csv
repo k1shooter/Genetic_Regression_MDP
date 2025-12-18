@@ -1,0 +1,13 @@
+Dataset,Metric,Best_Params,Best_CV_Score
+CM1,MCC,"{'pop_size': 300, 'max_depth': 4, 'crossover_rate': 0.8946874631931603, 'mutation_rate': 0.2632842290694434, 'rl_hybrid_ratio': 0.24170250842603005, 'rl_learning_rate': 0.00813012040795021}",0.22642376570256162
+JM1,MCC,"{'pop_size': 300, 'max_depth': 7, 'crossover_rate': 0.7979594748599342, 'mutation_rate': 0.1847530031058636, 'rl_hybrid_ratio': 0.4405041632607335, 'rl_learning_rate': 0.0038603372456527795}",0.24675654060682972
+KC1,MCC,"{'pop_size': 100, 'max_depth': 4, 'crossover_rate': 0.8148305916822747, 'mutation_rate': 0.26750755213052635, 'rl_hybrid_ratio': 0.48983687798417275, 'rl_learning_rate': 0.004570096605689841}",0.26590591654692536
+KC3,MCC,"{'pop_size': 100, 'max_depth': 7, 'crossover_rate': 0.7525846829171233, 'mutation_rate': 0.26813525968959323, 'rl_hybrid_ratio': 0.46773889464350094, 'rl_learning_rate': 0.009536056383731284}",0.3261332462192971
+MC1,MCC,"{'pop_size': 200, 'max_depth': 6, 'crossover_rate': 0.6627075177162363, 'mutation_rate': 0.28999878310733396, 'rl_hybrid_ratio': 0.3684284553194592, 'rl_learning_rate': 0.006649104462905552}",0.1558695948918634
+MC2,MCC,"{'pop_size': 300, 'max_depth': 8, 'crossover_rate': 0.9181651821848948, 'mutation_rate': 0.26797255931444186, 'rl_hybrid_ratio': 0.29436885057227524, 'rl_learning_rate': 0.004582152201939143}",0.5015167066708219
+MW1,MCC,"{'pop_size': 300, 'max_depth': 6, 'crossover_rate': 0.7234332386478544, 'mutation_rate': 0.1959491413559795, 'rl_hybrid_ratio': 0.24395793281844344, 'rl_learning_rate': 0.0033159134794236095}",0.40460381312261706
+PC1,MCC,"{'pop_size': 100, 'max_depth': 8, 'crossover_rate': 0.7494272485688863, 'mutation_rate': 0.26644976703599477, 'rl_hybrid_ratio': 0.42964860250163084, 'rl_learning_rate': 0.003992143102434313}",0.2854081349773978
+PC2,MCC,"{'pop_size': 300, 'max_depth': 8, 'crossover_rate': 0.8157046054682514, 'mutation_rate': 0.3808905084872988, 'rl_hybrid_ratio': 0.3516051396104757, 'rl_learning_rate': 0.007264850266487889}",0.1475102005261306
+PC3,MCC,"{'pop_size': 300, 'max_depth': 7, 'crossover_rate': 0.9390629499631254, 'mutation_rate': 0.13401709325799666, 'rl_hybrid_ratio': 0.5929106440345546, 'rl_learning_rate': 0.006588316034855081}",0.3628335775684457
+PC4,MCC,"{'pop_size': 300, 'max_depth': 6, 'crossover_rate': 0.7708635235575054, 'mutation_rate': 0.1254462241388095, 'rl_hybrid_ratio': 0.38318949261661595, 'rl_learning_rate': 0.003514530265301869}",0.49717115159308234
+PC5,MCC,"{'pop_size': 100, 'max_depth': 6, 'crossover_rate': 0.8651805762401681, 'mutation_rate': 0.17412111635778804, 'rl_hybrid_ratio': 0.2512052911609991, 'rl_learning_rate': 0.009240078722206703}",0.3473037684268039
