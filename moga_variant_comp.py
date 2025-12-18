@@ -6,34 +6,37 @@ import seaborn as sns
 from datetime import datetime
 
 # ====================================================
-# [1] 환경 설정 및 모듈 로드
+# [1] 환경 설정 및 모듈 로드 (경로 문제 해결)
 # ====================================================
-# ga-mo 폴더를 경로에 추가하여 모듈을 찾을 수 있게 함
+# [수정 1] ga-mo 뿐만 아니라 classifiers 폴더도 경로에 추가하여 
+# chirps_full.py 내부의 'from util import ...' 가 정상 작동하도록 함
 sys.path.append(os.path.abspath("ga_mo"))
+sys.path.append(os.path.abspath("classifiers")) 
 
 # 메인 실행 로직 및 클래스 로드
 try:
-    import ga_mo.main_multi_metric as main_script        # 실행 로직 (run_mo_ga_on_dataset 등)
+    import ga_mo.main as main_script        # 실행 로직 (run_mo_ga_on_dataset 등)
     import ga_mo.evolution as std_class     # 일반 GP 클래스 (Standard, Seeding)
     import ga_mo.rl_gep as rl_class         # RL GP 클래스 (RL, RL+Seeding)
     from ga_mo.gptree import Node, FUNCTIONS
 except ImportError as e:
     print(f"❌ 필수 모듈 로드 실패: {e}")
-    print("   'ga-mo' 폴더가 현재 위치에 있는지 확인해주세요.")
+    print("   'ga-mo' 및 'classifiers' 폴더가 현재 위치에 있는지 확인해주세요.")
     sys.exit(1)
 
 # ====================================================
-# [2] 실행 로직 최적화 (MCC 기준)
+# [2] 실행 로직 최적화 (MCC 기준 + 수정된 인자 대응)
 # ====================================================
 def run_mcc_only(dataset_name, need_seed=False):
     """
     기존 main.py의 실행 함수를 대체하여,
     불필요한 F1 최적화 루프를 제거하고 'MCC' 타겟만 수행합니다.
+    [수정 2] 팀원 코드 변경 사항(complexity_strategy)을 반영하여 
+    'simple', 'weighted' 두 전략을 모두 실행하고 결과를 합칩니다.
     """
     print(f"\n🚀 {dataset_name} Multi-Objective 분석 시작 (Target: MCC Only)...")
     
     # 데이터 로드 (main_script의 유틸리티 활용)
-    # 전처리된 데이터가 없으면 None 반환
     X_train, y_train, X_test, y_test = main_script.load_data_robust(dataset_name, data_type='rf')
     
     if X_train is None: 
@@ -42,13 +45,22 @@ def run_mcc_only(dataset_name, need_seed=False):
     # Seeding 준비
     seeds = None
     if need_seed:
-        # main.py에 이미 정의된 CHIRPS 시드 생성 함수 사용
+        # CHIRPS 시드 생성 (경로 추가로 인해 이제 정상 작동할 것임)
         seeds = main_script.get_chirps_seeds(X_train, y_train, n_seeds=20)
 
     data = (X_train.values, y_train.values, X_test.values, y_test.values)
     
-    # [핵심 변경] 'f1' -> 'mcc' 타겟으로 변경하여 실행
-    return main_script.optimize_and_evaluate(dataset_name, *data, 'mcc', seeds=seeds)
+    dataset_results = []
+    
+    # [수정 포인트] 팀원이 추가한 전략 인자에 대응하기 위해 루프 추가
+    strategies = ['simple', 'weighted']
+    
+    for strat in strategies:
+        # optimize_and_evaluate(..., target_metric, complexity_strategy, seeds=seeds)
+        res_list = main_script.optimize_and_evaluate(dataset_name, *data, 'mcc', strat, seeds=seeds)
+        dataset_results.extend(res_list)
+        
+    return dataset_results
 
 # main.py의 원래 함수를 우리가 만든 최적화 함수로 교체 (Monkey Patch)
 main_script.run_mo_ga_on_dataset = run_mcc_only
@@ -150,6 +162,7 @@ for dataset in TARGET_DATASETS:
             raw_res = main_script.run_mo_ga_on_dataset(dataset, need_seed=use_seed)
             
             # [핵심 변경] 결과 중 MCC 점수가 가장 높은 모델 1개만 추출
+            # simple/weighted 전략 중 더 좋은 결과가 자동으로 선택됨
             best_sol = None
             
             # run_mcc_only를 썼으므로 이미 타겟은 MCC지만, 안전하게 필터링
@@ -181,7 +194,7 @@ if all_results:
     
     # CSV 파일 저장
     timestamp = datetime.now().strftime('%m%d_%H%M')
-    csv_filename = f"final_comparison_MCC_{timestamp}.csv"  # 파일명에 MCC 명시
+    csv_filename = f"final_comparison_MCC_{timestamp}.csv"
     df.to_csv(csv_filename, index=False)
     print(f"\n💾 CSV 결과 파일 저장 완료: {csv_filename}")
     
