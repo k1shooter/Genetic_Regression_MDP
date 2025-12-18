@@ -5,9 +5,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef
 from util import load_data
+from datetime import datetime
 import warnings
-import platform
 
 # [라이브러리 확인]
 try:
@@ -204,10 +205,18 @@ def save_rule_plot(exp, instance_id, dataset_name, save_dir):
 def run_analysis(dataset_name):
     print(f"\n🚀 Analyzing {dataset_name} with CHIRPS (Full Pipeline)...")
     X_train, y_train, X_test, y_test = load_data(dataset_name, data_type='rf')
-    if X_train is None: return
+    if X_train is None: return []
 
     model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
+    
+    # [Metrics Calculation]
+    train_defective_ratio = y_train.mean() if y_train is not None else 0.0
+    test_defective_ratio = y_test.mean() if y_test is not None else 0.0
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, pos_label=1, average='binary', zero_division=0)
+    mcc = matthews_corrcoef(y_test, y_pred)
     
     num_classes = len(np.unique(y_train))
     explainer = CHIRPSExplainerEnhanced(model, X_train, y_train, num_classes)
@@ -241,28 +250,49 @@ def run_analysis(dataset_name):
             
             results_list.append({
                 'Dataset': dataset_name,
+                'Accuracy': accuracy,
+                'F1_Score': f1,
+                'MCC': mcc,
                 'Instance_ID': i,
                 'Predicted_Class': exp['target_class'],
                 'Stability': exp['stability'],
                 'Covered_Target': exp['n_target'],
                 'Covered_Others': exp['n_others'],
-                'Rule': rule_str
+                'Formula': rule_str,
+                'Train_Defective_Ratio': train_defective_ratio,
+                'Test_Defective_Ratio' : test_defective_ratio,
             })
         else:
             print(f"\n[Test ID {i}] No rule found.")
 
-    # 결과 CSV 저장
-    if results_list:
-        df = pd.DataFrame(results_list)
-        csv_path = os.path.join(save_dir, f"{dataset_name}_chirps_rules.csv")
-        df.to_csv(csv_path, index=False)
-        print(f"💾 Results saved to: {csv_path}")
+    return results_list
 
 if __name__ == "__main__":
+    all_results = []
+    
     for name in DATASET_NAMES:
         try:
-            run_analysis(name)
+            results = run_analysis(name)
+            if results:
+                all_results.extend(results)
         except Exception as e:
             print(f"Error {name}: {e}")
             import traceback
             traceback.print_exc()
+
+    if all_results:
+        version = datetime.now().strftime('%m%d_%H%M%S')
+        csv_filename = f"chirps_full_results_{version}.csv"
+        
+        df_all = pd.DataFrame(all_results)
+        
+        # 컬럼 순서 재배치 (Requested: Dataset, Accuracy, F1_Score, MCC Score, Formular)
+        # 나머지 컬럼은 뒤에 붙임
+        ordered_cols = ['Dataset', 'Accuracy', 'F1_Score', 'MCC', 'Formula']
+        remaining_cols = [c for c in df_all.columns if c not in ordered_cols]
+        df_all = df_all[ordered_cols + remaining_cols]
+        
+        df_all.to_csv(csv_filename, index=False)
+        print(f"\n💾 통합 결과가 '{csv_filename}'에 저장되었습니다.")
+    else:
+        print("\n⚠️ 저장할 결과가 없습니다.")
