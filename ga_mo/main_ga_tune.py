@@ -55,7 +55,7 @@ def get_chirps_seeds(X_train, y_train, n_seeds=20):
     if isinstance(y_train, np.ndarray): s_y = pd.Series(y_train)
     else: s_y = y_train.copy()
 
-    rf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42, n_jobs=-1)
+    rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42, n_jobs=-1)
     rf.fit(df_X, s_y)
     explainer = CHIRPSExplainerEnhanced(rf, df_X, s_y, len(np.unique(s_y)))
     target_indices = np.where(s_y == 1)[0]
