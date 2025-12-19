@@ -1,25 +1,25 @@
-# classifiers/chirps_full.py
-
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import warnings
+import traceback
+from datetime import datetime
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef
+
+# 유틸리티 모듈 임포트 시도
 try:
     from classifiers.util import load_data
 except ImportError:
     from util import load_data
     
-from datetime import datetime
-import warnings
-
-# [라이브러리 확인]
+# FP-Growth 알고리즘 라이브러리 확인
 try:
     from mlxtend.preprocessing import TransactionEncoder
     from mlxtend.frequent_patterns import fpgrowth
 except ImportError:
-    print("❌ mlxtend 라이브러리가 없습니다. 'pip install mlxtend'를 실행해주세요.")
+    print("오류: mlxtend 라이브러리가 없습니다. 'pip install mlxtend'를 실행해주세요.")
     exit()
 
 warnings.filterwarnings("ignore")
@@ -33,9 +33,9 @@ class CHIRPSExplainerEnhanced:
         self.y_train = y_train
         self.num_classes = num_classes
         self.feature_names = X_train.columns.tolist()
-        
+    
+    # 결정 트리의 경로 추출 함수   
     def _extract_paths(self, instance):
-        """[Step 1] 경로 추출 (Fix: float32 형변환 적용)"""
         paths = []
         # sklearn 트리 함수와의 호환성을 위해 float32로 변환
         instance_array = instance.values.reshape(1, -1).astype(np.float32)
@@ -72,9 +72,11 @@ class CHIRPSExplainerEnhanced:
             
         return paths
 
+    # FP-Growth를 이용한 빈발 패턴 마이닝 함수
     def _mine_frequent_patterns(self, paths, min_support=0.1):
-        """[Step 2] FP-Growth 패턴 마이닝"""
-        if not paths: return []
+        
+        if not paths: 
+            return []
 
         te = TransactionEncoder()
         te_ary = te.fit(paths).transform(paths)
@@ -85,22 +87,25 @@ class CHIRPSExplainerEnhanced:
         except Exception:
             return []
         
-        if frequent.empty: return []
+        if frequent.empty: 
+            return []
 
         snippets = []
         for _, row in frequent.iterrows():
             pattern = list(row['itemsets']) 
             support = row['support']
-            # 길이가 긴 패턴에 약간의 가중치
+            # 길이가 긴 패턴에 약간의 가중치 부여
             score = support * (len(pattern) ** 0.5) 
             snippets.append((pattern, score))
 
         snippets.sort(key=lambda x: x[1], reverse=True)
         return [s[0] for s in snippets]
 
+    # 규칙의 안정성 및 커버리지 계산 함수
     def _calculate_stability(self, rule, target_class):
-        """[Step 3] Stability 및 커버리지 계산"""
-        if not rule: return 0.0, 0, 0
+        
+        if not rule: 
+            return 0.0, 0, 0
             
         mask = np.ones(len(self.X_train), dtype=bool)
         
@@ -112,20 +117,23 @@ class CHIRPSExplainerEnhanced:
         
         covered_indices = np.where(mask)[0]
         n_covered = len(covered_indices)
-        if n_covered == 0: return 0.0, 0, 0
+        if n_covered == 0: 
+            return 0.0, 0, 0
             
         n_target = np.sum(self.y_train.iloc[covered_indices] == target_class)
         n_others = n_covered - n_target
         
-        # 논문의 Stability 공식
+        # 논문의 Stability 공식 적용
         stability = (n_target + 1) / (n_covered + self.num_classes)
         
         return stability, n_target, n_others
 
+    # 인스턴스에 대한 설명 생성 함수
     def explain_instance(self, instance):
-        """[Main] 설명 생성"""
+        
         paths = self._extract_paths(instance)
-        if not paths: return None
+        if not paths: 
+            return None
             
         ranked_patterns = self._mine_frequent_patterns(paths, min_support=0.1)
         
@@ -160,7 +168,8 @@ class CHIRPSExplainerEnhanced:
                 else:
                     best_stability = stab
         
-        if not final_rule: final_rule = current_rule
+        if not final_rule: 
+            final_rule = current_rule
 
         final_stab, n_target, n_others = self._calculate_stability(final_rule, target_class)
         
@@ -173,12 +182,13 @@ class CHIRPSExplainerEnhanced:
         }
 
     def rule_to_string(self, rule):
-        if not rule: return "No rule found."
+        if not rule: 
+            return "No rule found."
         clauses = [f"({self.feature_names[f]} {o} {t})" for f, o, t in rule]
         return " AND ".join(clauses)
 
+# 규칙의 Stability와 Coverage 시각화 저장 함수
 def save_rule_plot(exp, instance_id, dataset_name, save_dir):
-    """[시각화] 규칙의 Stability와 Coverage를 시각화"""
     plt.figure(figsize=(8, 5))
     
     categories = ['Target Class', 'Other Classes']
@@ -207,14 +217,15 @@ def save_rule_plot(exp, instance_id, dataset_name, save_dir):
     plt.close()
 
 def run_analysis(dataset_name):
-    print(f"\n🚀 Analyzing {dataset_name} with CHIRPS (Full Pipeline)...")
+    print(f"\nAnalyzing {dataset_name} with CHIRPS (Full Pipeline)...")
     X_train, y_train, X_test, y_test = load_data(dataset_name, data_type='rf')
-    if X_train is None: return []
+    if X_train is None: 
+        return []
 
     model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
     model.fit(X_train, y_train)
     
-    # [Metrics Calculation]
+    # 성능 지표 계산
     train_defective_ratio = y_train.mean() if y_train is not None else 0.0
     test_defective_ratio = y_test.mean() if y_test is not None else 0.0
     y_pred = model.predict(X_test)
@@ -281,7 +292,6 @@ if __name__ == "__main__":
                 all_results.extend(results)
         except Exception as e:
             print(f"Error {name}: {e}")
-            import traceback
             traceback.print_exc()
 
     if all_results:
@@ -290,13 +300,12 @@ if __name__ == "__main__":
         
         df_all = pd.DataFrame(all_results)
         
-        # 컬럼 순서 재배치 (Requested: Dataset, Accuracy, F1_Score, MCC Score, Formular)
-        # 나머지 컬럼은 뒤에 붙임
+        # 컬럼 순서 재배치 (Dataset, Accuracy, F1_Score, MCC Score, Formula 우선)
         ordered_cols = ['Dataset', 'Accuracy', 'F1_Score', 'MCC', 'Formula']
         remaining_cols = [c for c in df_all.columns if c not in ordered_cols]
         df_all = df_all[ordered_cols + remaining_cols]
         
         df_all.to_csv(csv_filename, index=False)
-        print(f"\n💾 통합 결과가 '{csv_filename}'에 저장되었습니다.")
+        print(f"\n통합 결과가 '{csv_filename}'에 저장되었습니다.")
     else:
-        print("\n⚠️ 저장할 결과가 없습니다.")
+        print("\n저장할 결과가 없습니다.")

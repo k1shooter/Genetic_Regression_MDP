@@ -1,29 +1,24 @@
-# classifiers/chirps_pdp_piecewise.py
-
 import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import platform
+import warnings
+import traceback
+
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression
 from sklearn.inspection import partial_dependence
 from scipy.stats import gaussian_kde
 from scipy.signal import find_peaks
-import platform
-import warnings
 from util import load_data
 
 warnings.filterwarnings("ignore")
 
-
-
 DATASET_NAMES = ['CM1', 'JM1', 'KC1'] 
 
+# CHIRPS 로직을 기반으로 가장 강력한 분기점과 안정성을 반환하는 함수
 def get_primary_chirps_threshold(model, feature_idx):
-    """
-    [CHIRPS Logic]
-    가장 강력한 분기점(Primary Threshold)과 그 지점의 안정성(Stability/Density)을 반환합니다.
-    """
     thresholds = []
     for estimator in model.estimators_:
         tree = estimator.tree_
@@ -59,10 +54,8 @@ def get_primary_chirps_threshold(model, feature_idx):
     except Exception:
         return None, 0.0
 
+# PDP 데이터를 기반으로 구간 선형 회귀를 수행하는 함수
 def fit_piecewise_linear(pdp_x, pdp_y, split_point):
-    """
-    [구간 선형 회귀]
-    """
     # 1. 분기점이 유효한지 확인
     if split_point is None or split_point <= pdp_x.min() or split_point >= pdp_x.max():
         lr = LinearRegression()
@@ -97,6 +90,7 @@ def fit_piecewise_linear(pdp_x, pdp_y, split_point):
     
     return fits, "Piecewise"
 
+# 분석 결과를 시각화하여 그래프로 저장하는 함수
 def save_piecewise_plot(pdp_x, pdp_y, fits, split_point, stability, importance, feature_name, dataset_name, save_dir):
     plt.figure(figsize=(10, 6))
     
@@ -139,8 +133,9 @@ def save_piecewise_plot(pdp_x, pdp_y, fits, split_point, stability, importance, 
     
     return slopes
 
+# 데이터셋을 로드하고 Piecewise 분석 및 메트릭을 계산하는 메인 함수
 def analyze_dataset_piecewise(dataset_name):
-    print(f"\n🚀 Analyzing Dataset (Piecewise + Metrics): {dataset_name}")
+    print(f"\nAnalyzing Dataset (Piecewise + Metrics): {dataset_name}")
     X_train, y_train, X_test, y_test = load_data(dataset_name, data_type='rf')
     
     if X_train is None:
@@ -163,20 +158,20 @@ def analyze_dataset_piecewise(dataset_name):
 
     for idx in indices:
         f_name = feature_names[idx]
-        imp_val = importances[idx]  # [추가] 중요도 값
+        imp_val = importances[idx]  # 중요도 값
         
         # 1. PDP 생성
         pdp_results = partial_dependence(model, X_train, features=[idx], grid_resolution=100)
         pdp_x = pdp_results['grid_values'][0]
         pdp_y = pdp_results['average'][0]
         
-        # 2. CHIRPS 분기점 및 안정성 찾기 [수정]
+        # 2. CHIRPS 분기점 및 안정성 찾기
         split_point, stability = get_primary_chirps_threshold(model, idx)
         
         # 3. 구간별 피팅
         fits, fit_type = fit_piecewise_linear(pdp_x, pdp_y, split_point)
         
-        # 4. 시각화 (중요도/안정성 정보 전달) [수정]
+        # 4. 시각화 (중요도/안정성 정보 전달)
         slopes = save_piecewise_plot(pdp_x, pdp_y, fits, split_point, stability, imp_val, f_name, dataset_name, save_dir)
         
         # 5. 수식 텍스트 생성
@@ -191,8 +186,8 @@ def analyze_dataset_piecewise(dataset_name):
             
         formulas.append({
             'Feature': f_name,
-            'Importance': imp_val,       # [추가]
-            'Split_Stability': stability,# [추가]
+            'Importance': imp_val,
+            'Split_Stability': stability,
             'Fit_Type': fit_type,
             'Split_Point': split_point if split_point else "N/A",
             'Slope_Before': slopes[0],
@@ -203,16 +198,15 @@ def analyze_dataset_piecewise(dataset_name):
 
     # 결과 저장
     pd.DataFrame(formulas).to_csv(os.path.join(save_dir, "piecewise_formulas_metrics.csv"), index=False)
-    print(f"💾 Results saved to {save_dir}/piecewise_formulas_metrics.csv")
+    print(f"Results saved to {save_dir}/piecewise_formulas_metrics.csv")
 
 if __name__ == "__main__":
     if not os.path.exists("../data"):
-        print("⚠️ Warning: '../data' directory not found.")
+        print("Warning: '../data' directory not found.")
     
     for name in DATASET_NAMES:
         try:
             analyze_dataset_piecewise(name)
         except Exception as e:
             print(f"Error: {e}")
-            import traceback
             traceback.print_exc()

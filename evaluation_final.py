@@ -10,14 +10,15 @@ from datetime import datetime
 # ====================================================
 # [1] 유틸리티 함수
 # ====================================================
+
+# 주어진 패턴에 맞는 가장 최신 파일을 찾는 함수
 def find_latest_result(pattern):
-    """주어진 패턴에 맞는 가장 최신 파일을 찾습니다."""
     files = glob.glob(pattern)
     if not files: return None
     return max(files, key=os.path.getctime)
 
+# 다양한 이름의 컬럼을 표준 이름으로 통일하는 함수
 def standardize_columns(df):
-    """다양한 이름의 컬럼을 표준 이름으로 통일합니다."""
     if df.empty: return df
     
     # 공백 제거
@@ -57,8 +58,8 @@ def standardize_columns(df):
                 
     return df
 
+# CHIRPS의 규칙 기반 formula 로드 함수
 def load_chirps_formulas():
-    """CHIRPS(RF) 규칙 수식을 로드합니다 (비교용)."""
     base_dir = "analysis_results/Piecewise"
     formula_map = {}
     if not os.path.exists(base_dir): return formula_map
@@ -78,7 +79,7 @@ def load_chirps_formulas():
 # [2] 데이터 로드 및 통합
 # ====================================================
 def load_and_merge_results():
-    print("📂 결과 파일 로딩 및 통합 중...")
+    print("결과 파일 로딩 및 통합 중...")
     dfs = []
 
     # 1. DNN (Baseline)
@@ -124,7 +125,7 @@ def load_and_merge_results():
         df['Type'] = 'Proposed'
         dfs.append(df)
     else:
-        print("⚠️ MOGA Variant 결과 파일(final_comparison_*.csv)을 찾을 수 없습니다.")
+        print("[Warning] MOGA Variant 결과 파일(final_comparison_*.csv)을 찾을 수 없습니다.")
 
     if not dfs:
         return pd.DataFrame()
@@ -145,8 +146,9 @@ def load_and_merge_results():
 # ====================================================
 # [3] 시각화 및 분석 출력
 # ====================================================
+
+# 모든 모델을 비교하는 그래프를 그리는 함수
 def plot_comprehensive_comparison(df):
-    """모든 모델(Baseline + Variants)을 비교하는 그래프"""
     if df.empty: return
 
     save_dir = "final_evaluation_plots"
@@ -190,16 +192,16 @@ def plot_comprehensive_comparison(df):
         plt.close()
         print(f"📊 그래프 저장 완료: {filename}")
 
+# 성능 및 복잡도 요약 테이블을 출력하는 함수
 def print_summary_tables(df):
-    """성능 및 복잡도 요약 테이블 출력"""
     print("\n" + "="*80)
-    print("🏆 Final Evaluation Summary")
+    print("Final Evaluation Summary")
     print("="*80)
     
     datasets = sorted(df['Dataset'].unique())
     
     # 1. Performance Summary (MCC 기준 Best)
-    print("\n📌 Table 1: Best Model per Dataset (Target: MCC)")
+    print("\nTable 1: Best Model per Dataset (Target: MCC)")
     perf_data = []
     
     for ds in datasets:
@@ -229,7 +231,8 @@ def print_summary_tables(df):
     print(tabulate(perf_data, headers=headers, tablefmt="fancy_grid"))
     
     # 2. GP Variants Comparison
-    print("\n📌 Table 2: GP Variants Comparison (Average MCC)")
+    print("\nTable 2: GP Variants Comparison (Average MCC)")
+    
     # GP 모델들만 필터링
     gp_df = df[df['Model'].str.contains("GP")]
     if not gp_df.empty:
@@ -238,7 +241,7 @@ def print_summary_tables(df):
         print(tabulate(var_data, headers=["GP Variant", "Avg MCC"], tablefmt="simple"))
         
     # 3. Complexity & Formula
-    print("\n📌 Table 3: Complexity & Interpretability (Best GP vs RF)")
+    print("\nTable 3: Complexity & Interpretability (Best GP vs RF)")
     cplx_data = []
     chirps_rules = load_chirps_formulas()
     
@@ -277,10 +280,10 @@ if __name__ == "__main__":
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         csv_name = f"final_comprehensive_results_{timestamp}.csv"
         final_df.to_csv(csv_name, index=False)
-        print(f"\n💾 통합 결과 저장 완료: {csv_name}")
+        print(f"\n통합 결과 저장 완료: {csv_name}")
         
         # 그래프 및 테이블 출력
         plot_comprehensive_comparison(final_df)
         print_summary_tables(final_df)
     else:
-        print("❌ 분석할 데이터가 없습니다.")
+        print("[Warning] 분석할 데이터가 없습니다.")
