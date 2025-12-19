@@ -166,7 +166,7 @@ def plot_convergence(history_random, history_seed, dataset_name):
 # ====================================================
 if __name__ == "__main__":
     # 데이터셋 선택 (CM1 추천)
-    TARGET_DATASET = 'KC1'
+    TARGET_DATASET = 'PC4'
     
     h_random, h_seed = run_ablation_experiment(TARGET_DATASET)
     
