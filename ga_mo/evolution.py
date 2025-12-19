@@ -14,7 +14,8 @@ class MultiObjectiveGP:
                  mutation_rate=0.1,
                  random_state=42,
                  metric='mcc',
-                 complexity_strategy='simple'):
+                 complexity_strategy='simple',
+                 **kwargs):
         self.n_features = n_features
         self.pop_size = pop_size
         self.generations = generations
@@ -25,6 +26,9 @@ class MultiObjectiveGP:
         self.metric = metric.lower()
         self.complexity_strategy = complexity_strategy.lower()
         
+        if kwargs:
+            pass
+
         random.seed(random_state)
         np.random.seed(random_state)
         
@@ -115,7 +119,7 @@ class MultiObjectiveGP:
         except Exception:
             individual.objectives = (2.0, 1000.0)
             individual.f1_score = 0.0
-            individual.mcc_score = 0.0
+            individual.mcc_score = -1.0
             individual.size_score = 1000
             individual.weighted_score = 1000
 

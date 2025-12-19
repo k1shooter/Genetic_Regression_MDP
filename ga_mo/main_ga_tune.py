@@ -76,7 +76,7 @@ def get_chirps_seeds(X_train, y_train, n_seeds=20):
     else:
         s_y = y_train.copy()
 
-    rf = RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42, n_jobs=-1)
+    rf = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42, n_jobs=-1)
     rf.fit(df_X, s_y)
     
     num_classes = len(np.unique(s_y))
